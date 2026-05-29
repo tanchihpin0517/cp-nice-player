@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} https:; media-src {{cspSource}}; style-src {{cspSource}}; script-src {{cspSource}};">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CP Nice Player</title>
+  <link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+  <main class="card">
+    <h1>CP Nice Player</h1>
+    <p class="subtitle">Open a local audio or video file to start playback.</p>
+    <section class="track" aria-live="polite">
+      <div>
+        <div class="track-name" id="trackName">No media loaded</div>
+        <div class="track-state" id="trackState">Waiting for a file</div>
+      </div>
+    </section>
+    <audio id="audioPlayer" class="media-player" controls preload="metadata"></audio>
+    <video id="videoPlayer" class="media-player" controls preload="metadata"></video>
+    <div class="empty" id="emptyState">Right-click a media file in Explorer and choose "Open in CP Nice Player".</div>
+    <details class="debug-panel" id="debugPanel" open>
+      <summary>Debug information</summary>
+      <div class="debug-body">
+        <dl class="debug-grid" id="debugGrid"></dl>
+        <div class="debug-log-title">Event log</div>
+        <ol class="debug-log" id="debugLog"></ol>
+      </div>
+    </details>
+  </main>
+  <script src="{{scriptUri}}"></script>
+</body>
+</html>

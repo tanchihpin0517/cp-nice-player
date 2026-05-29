@@ -9,15 +9,37 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:cp-nice-player.open"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "cp-nice-player.helloWorld",
-        "title": "Hello World"
+        "command": "cp-nice-player.open",
+        "title": "Open in CP Nice Player",
+        "category": "CP Nice Player"
       }
-    ]
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "cp-nice-player.open",
+          "group": "navigation",
+          "when": "resourceScheme == file && resourceExtname =~ /\\.(mp3|wav|ogg|flac|m4a|aac|mp4|webm|mov|mkv)$/i"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "CP Nice Player",
+      "properties": {
+        "cp-nice-player.ffmpegPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the ffmpeg executable. Leave empty to use ffmpeg from PATH."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

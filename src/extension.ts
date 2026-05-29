@@ -1,26 +1,47 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import { checkFfmpegAvailable } from './ffmpeg';
+import { getMediaType, MEDIA_FILE_FILTERS, MediaPlayerPanel } from './playerPanel';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+	const openCommand = vscode.commands.registerCommand(
+		'cp-nice-player.open',
+		async (uri?: vscode.Uri) => {
+			let mediaUri = uri;
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "cp-nice-player" is now active!');
+			if (!mediaUri) {
+				const selected = await vscode.window.showOpenDialog({
+					canSelectMany: false,
+					openLabel: 'Open in CP Nice Player',
+					filters: MEDIA_FILE_FILTERS,
+				});
+				mediaUri = selected?.[0];
+			}
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('cp-nice-player.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from cp-nice-player!');
-	});
+			if (!mediaUri) {
+				return;
+			}
 
-	context.subscriptions.push(disposable);
+			if (!getMediaType(mediaUri)) {
+				void vscode.window.showErrorMessage(
+					'CP Nice Player does not support this file type.',
+				);
+				return;
+			}
+
+			const ffmpeg = await checkFfmpegAvailable();
+			if (!ffmpeg.available) {
+				void vscode.window.showErrorMessage(
+					`CP Nice Player requires FFmpeg. ${ffmpeg.error ?? 'Install ffmpeg and ensure it is on your PATH.'}`,
+				);
+				return;
+			}
+
+			const panel = MediaPlayerPanel.createOrShow(context.extensionUri, mediaUri);
+			panel.loadMedia(mediaUri, ffmpeg);
+		},
+	);
+
+	context.subscriptions.push(openCommand);
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {}
