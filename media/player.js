@@ -266,6 +266,45 @@ window.addEventListener('message', (event) => {
   }
 });
 
+function shouldIgnoreSpaceKey(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return true;
+  }
+  const tag = target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
+    return true;
+  }
+  if (target.closest('summary')) {
+    return true;
+  }
+  if (target === audioPlayer) {
+    return true;
+  }
+  return false;
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.code !== 'Space' && event.key !== ' ') {
+    return;
+  }
+  if (event.repeat || shouldIgnoreSpaceKey(event)) {
+    return;
+  }
+  if (!audioPlayer.src || !debugContext) {
+    return;
+  }
+
+  event.preventDefault();
+  if (audioPlayer.paused) {
+    audioPlayer.play().catch(() => {
+      logEvent('play-blocked');
+    });
+  } else {
+    audioPlayer.pause();
+  }
+});
+
 debugPanel.addEventListener('toggle', () => {
   vscode.setState({ debugOpen: debugPanel.open });
 });
