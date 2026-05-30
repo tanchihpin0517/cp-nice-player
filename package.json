@@ -1,7 +1,7 @@
 {
   "name": "cp-nice-player",
-  "displayName": "cp-nice-player",
-  "description": "CP's nice player",
+  "displayName": "CP's Nice Player",
+  "description": "Audio player for local files with optional FFmpeg fallback for unsupported formats.",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.120.0"
@@ -10,15 +10,27 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:cp-nice-player.open"
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "cp-nice-player.open",
-        "title": "Open in CP Nice Player",
-        "category": "CP Nice Player"
+        "title": "Open in CP's Nice Player",
+        "category": "CP's Nice Player"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "cpNicePlayer.mediaPreview",
+        "displayName": "CP's Nice Player",
+        "priority": "option",
+        "selector": [
+          {
+            "filenamePattern": "*.{mp3,wav,ogg,flac,m4a,aac,webm,mp4,mkv}"
+          }
+        ]
       }
     ],
     "menus": {
@@ -26,17 +38,27 @@
         {
           "command": "cp-nice-player.open",
           "group": "navigation",
-          "when": "resourceScheme == file && resourceExtname =~ /\\.(mp3|wav|ogg|flac|m4a|aac|mp4|webm|mov|mkv)$/i"
+          "when": "resourceScheme == file && resourceExtname =~ /\\.(mp3|wav|ogg|flac|m4a|aac|webm|mp4|mkv)$/i"
         }
       ]
     },
     "configuration": {
-      "title": "CP Nice Player",
+      "title": "CP's Nice Player",
       "properties": {
         "cp-nice-player.ffmpegPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the ffmpeg executable. Leave empty to use ffmpeg from PATH."
+          "description": "Optional path to the ffmpeg executable. Leave empty to use ffmpeg from PATH. FFmpeg is only required for cache/stream fallback when native playback fails."
+        },
+        "cp-nice-player.unsupportedPlayback": {
+          "type": "string",
+          "enum": ["cache", "stream"],
+          "enumDescriptions": [
+            "Transcode to a cached file and play that when native playback fails.",
+            "Serve adaptive streaming (HLS/DASH) when native playback fails."
+          ],
+          "default": "cache",
+          "description": "How to play media the browser cannot decode natively. Requires FFmpeg and has no effect when FFmpeg is not available. Not yet active; applies when transcoding is implemented."
         }
       }
     }

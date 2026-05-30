@@ -1,6 +1,5 @@
 const vscode = acquireVsCodeApi();
 const audioPlayer = document.getElementById('audioPlayer');
-const videoPlayer = document.getElementById('videoPlayer');
 const trackName = document.getElementById('trackName');
 const trackState = document.getElementById('trackState');
 const emptyState = document.getElementById('emptyState');
@@ -8,7 +7,6 @@ const debugGrid = document.getElementById('debugGrid');
 const debugLog = document.getElementById('debugLog');
 const debugPanel = document.getElementById('debugPanel');
 
-let activePlayer = null;
 let debugContext = null;
 const eventLog = [];
 const MAX_LOG_ENTRIES = 30;
@@ -72,44 +70,55 @@ function renderDebugField(label, value) {
   return '<dt>' + label + '</dt><dd>' + (value ?? '—') + '</dd>';
 }
 
+function getPlaybackErrorMessage(code) {
+  const ffmpegMissing = !debugContext?.debug?.ffmpeg?.available;
+  if (ffmpegMissing && (code === 3 || code === 4)) {
+    return 'Format not supported — install FFmpeg to enable fallback playback';
+  }
+  const messages = {
+    1: 'Playback aborted',
+    2: 'Network error while loading media',
+    3: 'Media decode error',
+    4: 'Media format not supported',
+  };
+  return messages[code] ?? 'Playback error';
+}
+
 function updateDebugPanel() {
   if (!debugContext) {
     debugGrid.innerHTML = renderDebugField('Status', 'No media loaded');
     return;
   }
 
-  const player = activePlayer;
+  const player = audioPlayer;
   const fields = [
     renderDebugField('File', debugContext.name),
     renderDebugField('Path', debugContext.debug.fsPath),
     renderDebugField('Scheme', debugContext.debug.scheme),
-    renderDebugField('Media type', debugContext.mediaType),
     renderDebugField('Webview URI', debugContext.source),
     renderDebugField('Resource roots', debugContext.debug.resourceRoots.join('\n')),
     renderDebugField('ffmpeg', debugContext.debug.ffmpeg?.available ? 'available' : 'missing'),
     renderDebugField('ffmpeg.path', debugContext.debug.ffmpeg?.path),
     renderDebugField('ffmpeg.version', debugContext.debug.ffmpeg?.version),
-    renderDebugField('Active element', player?.tagName.toLowerCase() ?? '—'),
-    renderDebugField('readyState', player ? READY_STATE_LABELS[player.readyState] ?? player.readyState : '—'),
-    renderDebugField('networkState', player ? NETWORK_STATE_LABELS[player.networkState] ?? player.networkState : '—'),
-    renderDebugField('currentTime', player ? formatTime(player.currentTime) : '—'),
-    renderDebugField('duration', player ? formatTime(player.duration) : '—'),
-    renderDebugField('paused', player ? String(player.paused) : '—'),
-    renderDebugField('ended', player ? String(player.ended) : '—'),
-    renderDebugField('seeking', player ? String(player.seeking) : '—'),
-    renderDebugField('volume', player ? player.volume.toFixed(2) : '—'),
-    renderDebugField('muted', player ? String(player.muted) : '—'),
-    renderDebugField('buffered', player ? formatBuffered(player) : '—'),
+    renderDebugField('ffmpeg.error', debugContext.debug.ffmpeg?.error),
+    renderDebugField('playback', debugContext.debug.unsupportedPlayback),
+    renderDebugField(
+      'playback.enabled',
+      debugContext.debug.unsupportedPlaybackEnabled ? 'yes' : 'no',
+    ),
+    renderDebugField('readyState', READY_STATE_LABELS[player.readyState] ?? player.readyState),
+    renderDebugField('networkState', NETWORK_STATE_LABELS[player.networkState] ?? player.networkState),
+    renderDebugField('currentTime', formatTime(player.currentTime)),
+    renderDebugField('duration', formatTime(player.duration)),
+    renderDebugField('paused', String(player.paused)),
+    renderDebugField('ended', String(player.ended)),
+    renderDebugField('seeking', String(player.seeking)),
+    renderDebugField('volume', player.volume.toFixed(2)),
+    renderDebugField('muted', String(player.muted)),
+    renderDebugField('buffered', formatBuffered(player)),
   ];
 
-  if (player?.tagName === 'VIDEO') {
-    fields.push(
-      renderDebugField('videoWidth', String(player.videoWidth || '—')),
-      renderDebugField('videoHeight', String(player.videoHeight || '—')),
-    );
-  }
-
-  if (player?.error) {
+  if (player.error) {
     fields.push(
       renderDebugField('error.code', ERROR_LABELS[player.error.code] ?? String(player.error.code)),
       renderDebugField('error.message', player.error.message || '—'),
@@ -117,16 +126,6 @@ function updateDebugPanel() {
   }
 
   debugGrid.innerHTML = fields.join('');
-}
-
-function setActivePlayer(player) {
-  if (activePlayer && activePlayer !== player) {
-    activePlayer.pause();
-    activePlayer.removeAttribute('src');
-    activePlayer.classList.remove('active');
-  }
-  activePlayer = player;
-  player.classList.add('active');
 }
 
 function bindPlayerEvents(player) {
@@ -183,18 +182,11 @@ function bindPlayerEvents(player) {
   });
   player.addEventListener('error', () => {
     const code = player.error?.code ?? 0;
-    const messages = {
-      1: 'Playback aborted',
-      2: 'Network error while loading media',
-      3: 'Media decode error',
-      4: 'Media format not supported',
-    };
-    trackState.textContent = messages[code] ?? 'Playback error';
+    trackState.textContent = getPlaybackErrorMessage(code);
   });
 }
 
 bindPlayerEvents(audioPlayer);
-bindPlayerEvents(videoPlayer);
 updateDebugPanel();
 
 window.addEventListener('message', (event) => {
@@ -206,29 +198,26 @@ window.addEventListener('message', (event) => {
   debugContext = message;
   eventLog.length = 0;
   renderEventLog();
-  logEvent('loadMedia', message.mediaType + ' · ' + message.name);
-
-  const player = message.mediaType === 'video' ? videoPlayer : audioPlayer;
-  setActivePlayer(player);
+  logEvent('loadMedia', message.name);
 
   trackName.textContent = message.name;
   emptyState.style.display = 'none';
-  player.src = message.source;
-  player.load();
+  audioPlayer.src = message.source;
+  audioPlayer.load();
   trackState.textContent = 'Loading';
   updateDebugPanel();
 
   const onCanPlay = () => {
-    player.removeEventListener('canplay', onCanPlay);
+    audioPlayer.removeEventListener('canplay', onCanPlay);
     trackState.textContent = 'Ready';
     updateDebugPanel();
-    player.play().catch(() => {
+    audioPlayer.play().catch(() => {
       trackState.textContent = 'Ready — press play';
       logEvent('autoplay-blocked');
     });
   };
 
-  player.addEventListener('canplay', onCanPlay);
+  audioPlayer.addEventListener('canplay', onCanPlay);
 });
 
 debugPanel.addEventListener('toggle', () => {

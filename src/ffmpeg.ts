@@ -4,6 +4,8 @@ import * as vscode from 'vscode';
 
 const execFileAsync = promisify(execFile);
 
+export const FFMPEG_MISSING_NOTIFIED_KEY = 'ffmpegMissingNotified';
+
 export interface FfmpegCheckResult {
 	available: boolean;
 	path: string;
@@ -50,6 +52,34 @@ export async function checkFfmpegAvailable(force = false): Promise<FfmpegCheckRe
 	return cachedResult;
 }
 
-export function clearFfmpegCache(): void {
+export async function maybeNotifyFfmpegMissingOnce(
+	context: vscode.ExtensionContext,
+	ffmpeg: FfmpegCheckResult,
+): Promise<void> {
+	if (ffmpeg.available || context.globalState.get(FFMPEG_MISSING_NOTIFIED_KEY)) {
+		return;
+	}
+
+	const detail = ffmpeg.error ?? 'Install ffmpeg and ensure it is on your PATH.';
+	void vscode.window.showInformationMessage(
+		`FFmpeg was not found. Native playback still works; cache/stream fallback for unsupported formats is disabled. ${detail}`,
+	);
+	await context.globalState.update(FFMPEG_MISSING_NOTIFIED_KEY, true);
+}
+
+export async function warmFfmpegAndNotifyOnce(
+	context: vscode.ExtensionContext,
+): Promise<FfmpegCheckResult> {
+	const ffmpeg = await checkFfmpegAvailable();
+	await maybeNotifyFfmpegMissingOnce(context, ffmpeg);
+	return ffmpeg;
+}
+
+export async function clearFfmpegCache(
+	context: vscode.ExtensionContext,
+): Promise<FfmpegCheckResult> {
 	cachedResult = undefined;
+	const ffmpeg = await checkFfmpegAvailable(true);
+	await maybeNotifyFfmpegMissingOnce(context, ffmpeg);
+	return ffmpeg;
 }

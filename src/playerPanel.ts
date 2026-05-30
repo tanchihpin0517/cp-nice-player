@@ -1,34 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { UnsupportedPlayback } from './config';
 import { FfmpegCheckResult } from './ffmpeg';
+import { isSupportedAudio } from './mediaTypes';
 
-export type MediaType = 'audio' | 'video';
-
-const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac']);
-const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.mkv']);
-
-export function getMediaType(uri: vscode.Uri): MediaType | undefined {
-	const extension = uri.path.slice(uri.path.lastIndexOf('.')).toLowerCase();
-	if (AUDIO_EXTENSIONS.has(extension)) {
-		return 'audio';
-	}
-	if (VIDEO_EXTENSIONS.has(extension)) {
-		return 'video';
-	}
-	return undefined;
-}
-
-export const MEDIA_FILE_FILTERS: Record<string, string[]> = {
-	'Audio': ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'],
-	'Video': ['mp4', 'webm', 'mov', 'mkv'],
-};
+export { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
 
 interface LoadMediaMessage {
 	type: 'loadMedia';
 	name: string;
 	source: string;
-	mediaType: MediaType;
 	debug: {
 		fsPath: string;
 		scheme: string;
@@ -37,86 +19,57 @@ interface LoadMediaMessage {
 			available: boolean;
 			path: string;
 			version?: string;
+			error?: string;
 		};
+		unsupportedPlayback: UnsupportedPlayback;
+		unsupportedPlaybackEnabled: boolean;
 	};
 }
 
-export class MediaPlayerPanel {
-	private static currentPanel: MediaPlayerPanel | undefined;
-
-	static createOrShow(extensionUri: vscode.Uri, mediaUri: vscode.Uri): MediaPlayerPanel {
-		const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
-		const resourceRoots = getResourceRoots(extensionUri, mediaUri);
-
-		if (MediaPlayerPanel.currentPanel) {
-			if (!rootsCoverMedia(MediaPlayerPanel.currentPanel.resourceRoots, mediaUri)) {
-				MediaPlayerPanel.currentPanel.dispose();
-				MediaPlayerPanel.currentPanel = undefined;
-			} else {
-				MediaPlayerPanel.currentPanel.panel.reveal(column);
-				return MediaPlayerPanel.currentPanel;
-			}
-		}
-
-		const panel = vscode.window.createWebviewPanel(
-			'cpNicePlayer',
-			'CP Nice Player',
-			column,
-			{
-				enableScripts: true,
-				retainContextWhenHidden: true,
-				localResourceRoots: resourceRoots,
-			},
-		);
-
-		MediaPlayerPanel.currentPanel = new MediaPlayerPanel(panel, resourceRoots, extensionUri);
-		return MediaPlayerPanel.currentPanel;
-	}
-
+export class MediaPlayerSession implements vscode.Disposable {
 	private readonly panel: vscode.WebviewPanel;
 	private readonly disposables: vscode.Disposable[] = [];
 	private readonly resourceRoots: vscode.Uri[];
 	private readonly extensionUri: vscode.Uri;
 	private currentMedia: vscode.Uri | undefined;
 	private currentFfmpeg: FfmpegCheckResult | undefined;
+	private currentUnsupportedPlayback: UnsupportedPlayback | undefined;
 
-	private constructor(panel: vscode.WebviewPanel, resourceRoots: vscode.Uri[], extensionUri: vscode.Uri) {
+	constructor(
+		panel: vscode.WebviewPanel,
+		extensionUri: vscode.Uri,
+		resourceRoots: vscode.Uri[],
+	) {
 		this.panel = panel;
-		this.resourceRoots = resourceRoots;
 		this.extensionUri = extensionUri;
+		this.resourceRoots = resourceRoots;
 		this.panel.webview.html = this.getHtml(this.panel.webview);
 
 		this.panel.webview.onDidReceiveMessage((message) => {
-			if (message?.type === 'ready' && this.currentMedia && this.currentFfmpeg) {
-				this.postMedia(this.currentMedia, this.currentFfmpeg);
+			if (message?.type === 'ready' && this.currentMedia && this.currentFfmpeg && this.currentUnsupportedPlayback) {
+				this.postMedia(this.currentMedia, this.currentFfmpeg, this.currentUnsupportedPlayback);
 			}
 		}, undefined, this.disposables);
 
-		this.panel.onDidDispose(() => this.cleanup(), null, this.disposables);
+		this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
 	}
 
-	loadMedia(mediaUri: vscode.Uri, ffmpeg: FfmpegCheckResult): void {
+	loadMedia(mediaUri: vscode.Uri, ffmpeg: FfmpegCheckResult, unsupportedPlayback: UnsupportedPlayback): void {
 		this.currentMedia = mediaUri;
 		this.currentFfmpeg = ffmpeg;
-		this.postMedia(mediaUri, ffmpeg);
-		this.panel.reveal(this.panel.viewColumn);
+		this.currentUnsupportedPlayback = unsupportedPlayback;
+		this.postMedia(mediaUri, ffmpeg, unsupportedPlayback);
 	}
 
 	dispose(): void {
-		this.panel.dispose();
-	}
-
-	private cleanup(): void {
-		MediaPlayerPanel.currentPanel = undefined;
 		while (this.disposables.length > 0) {
 			const disposable = this.disposables.pop();
 			disposable?.dispose();
 		}
 	}
 
-	private postMedia(mediaUri: vscode.Uri, ffmpeg: FfmpegCheckResult): void {
-		const mediaType = getMediaType(mediaUri);
-		if (!mediaType) {
+	private postMedia(mediaUri: vscode.Uri, ffmpeg: FfmpegCheckResult, unsupportedPlayback: UnsupportedPlayback): void {
+		if (!isSupportedAudio(mediaUri)) {
 			return;
 		}
 
@@ -124,7 +77,6 @@ export class MediaPlayerPanel {
 			type: 'loadMedia',
 			name: mediaUri.path.split('/').pop() ?? mediaUri.fsPath,
 			source: this.panel.webview.asWebviewUri(mediaUri).toString(),
-			mediaType,
 			debug: {
 				fsPath: mediaUri.fsPath,
 				scheme: mediaUri.scheme,
@@ -133,7 +85,10 @@ export class MediaPlayerPanel {
 					available: ffmpeg.available,
 					path: ffmpeg.path,
 					version: ffmpeg.version,
+					error: ffmpeg.error,
 				},
+				unsupportedPlayback,
+				unsupportedPlaybackEnabled: ffmpeg.available,
 			},
 		};
 
@@ -153,7 +108,7 @@ export class MediaPlayerPanel {
 	}
 }
 
-function getResourceRoots(extensionUri: vscode.Uri, mediaUri?: vscode.Uri): vscode.Uri[] {
+export function getResourceRoots(extensionUri: vscode.Uri, mediaUri?: vscode.Uri): vscode.Uri[] {
 	const roots = new Map<string, vscode.Uri>();
 	roots.set(extensionUri.toString(), extensionUri);
 
@@ -167,12 +122,4 @@ function getResourceRoots(extensionUri: vscode.Uri, mediaUri?: vscode.Uri): vsco
 	}
 
 	return [...roots.values()];
-}
-
-function rootsCoverMedia(roots: vscode.Uri[], mediaUri: vscode.Uri): boolean {
-	const mediaPath = mediaUri.fsPath;
-	return roots.some((root) => {
-		const rootPath = root.fsPath;
-		return mediaPath === rootPath || mediaPath.startsWith(`${rootPath}${path.sep}`);
-	});
 }

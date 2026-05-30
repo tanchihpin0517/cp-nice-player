@@ -4,22 +4,21 @@
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} https:; media-src {{cspSource}}; style-src {{cspSource}}; script-src {{cspSource}};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CP Nice Player</title>
+  <title>CP's Nice Player</title>
   <link rel="stylesheet" href="{{styleUri}}">
 </head>
 <body>
   <main class="card">
-    <h1>CP Nice Player</h1>
-    <p class="subtitle">Open a local audio or video file to start playback.</p>
+    <h1>CP's Nice Player</h1>
+    <p class="subtitle">Open a local audio file to start playback.</p>
     <section class="track" aria-live="polite">
       <div>
         <div class="track-name" id="trackName">No media loaded</div>
         <div class="track-state" id="trackState">Waiting for a file</div>
       </div>
     </section>
-    <audio id="audioPlayer" class="media-player" controls preload="metadata"></audio>
-    <video id="videoPlayer" class="media-player" controls preload="metadata"></video>
-    <div class="empty" id="emptyState">Right-click a media file in Explorer and choose "Open in CP Nice Player".</div>
+    <audio id="audioPlayer" controls preload="metadata"></audio>
+    <div class="empty" id="emptyState">Right-click an audio file in Explorer and choose "Open in CP's Nice Player".</div>
     <details class="debug-panel" id="debugPanel" open>
       <summary>Debug information</summary>
       <div class="debug-body">

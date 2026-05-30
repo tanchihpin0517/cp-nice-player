@@ -1,8 +1,31 @@
 import * as vscode from 'vscode';
-import { checkFfmpegAvailable } from './ffmpeg';
-import { getMediaType, MEDIA_FILE_FILTERS, MediaPlayerPanel } from './playerPanel';
+import {
+	clearFfmpegCache,
+	FFMPEG_MISSING_NOTIFIED_KEY,
+	warmFfmpegAndNotifyOnce,
+} from './ffmpeg';
+import { MEDIA_EDITOR_VIEW_TYPE, MediaEditorProvider } from './mediaEditorProvider';
+import { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
 
 export function activate(context: vscode.ExtensionContext) {
+	const configChange = vscode.workspace.onDidChangeConfiguration((event) => {
+		if (event.affectsConfiguration('cp-nice-player.ffmpegPath')) {
+			void context.globalState.update(FFMPEG_MISSING_NOTIFIED_KEY, undefined);
+			void clearFfmpegCache(context);
+		}
+	});
+	context.subscriptions.push(configChange);
+
+	context.subscriptions.push(
+		vscode.window.registerCustomEditorProvider(
+			MEDIA_EDITOR_VIEW_TYPE,
+			new MediaEditorProvider(context),
+			{
+				webviewOptions: { retainContextWhenHidden: true },
+			},
+		),
+	);
+
 	const openCommand = vscode.commands.registerCommand(
 		'cp-nice-player.open',
 		async (uri?: vscode.Uri) => {
@@ -11,7 +34,7 @@ export function activate(context: vscode.ExtensionContext) {
 			if (!mediaUri) {
 				const selected = await vscode.window.showOpenDialog({
 					canSelectMany: false,
-					openLabel: 'Open in CP Nice Player',
+					openLabel: "Open in CP's Nice Player",
 					filters: MEDIA_FILE_FILTERS,
 				});
 				mediaUri = selected?.[0];
@@ -21,27 +44,26 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			if (!getMediaType(mediaUri)) {
+			if (!isSupportedAudio(mediaUri)) {
 				void vscode.window.showErrorMessage(
-					'CP Nice Player does not support this file type.',
+					"CP's Nice Player does not support this file type.",
 				);
 				return;
 			}
 
-			const ffmpeg = await checkFfmpegAvailable();
-			if (!ffmpeg.available) {
-				void vscode.window.showErrorMessage(
-					`CP Nice Player requires FFmpeg. ${ffmpeg.error ?? 'Install ffmpeg and ensure it is on your PATH.'}`,
-				);
-				return;
-			}
+			await warmFfmpegAndNotifyOnce(context);
 
-			const panel = MediaPlayerPanel.createOrShow(context.extensionUri, mediaUri);
-			panel.loadMedia(mediaUri, ffmpeg);
+			await vscode.commands.executeCommand(
+				'vscode.openWith',
+				mediaUri,
+				MEDIA_EDITOR_VIEW_TYPE,
+			);
 		},
 	);
 
 	context.subscriptions.push(openCommand);
+
+	void warmFfmpegAndNotifyOnce(context);
 }
 
 export function deactivate() {}

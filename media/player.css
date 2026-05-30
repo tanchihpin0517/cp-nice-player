@@ -58,22 +58,8 @@ h1 {
   font-size: 13px;
 }
 
-audio,
-video {
+audio {
   width: 100%;
-  display: block;
-}
-
-video {
-  border-radius: 12px;
-  background: #000;
-}
-
-.media-player {
-  display: none;
-}
-
-.media-player.active {
   display: block;
 }
 
