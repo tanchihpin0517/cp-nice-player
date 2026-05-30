@@ -25,7 +25,7 @@
       {
         "viewType": "cpNicePlayer.mediaPreview",
         "displayName": "CP's Nice Player",
-        "priority": "option",
+        "priority": "default",
         "selector": [
           {
             "filenamePattern": "*.{mp3,wav,ogg,flac,m4a,aac,webm,mp4,mkv}"

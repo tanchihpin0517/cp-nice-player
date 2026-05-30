@@ -4,6 +4,8 @@ This is the README for your extension "cp-nice-player". After writing up a brief
 
 ## Features
 
+Supported audio and video containers (MP3, WAV, OGG, FLAC, M4A, AAC, WebM, MP4, MKV) open in **CP's Nice Player** by default. To use a different editor, use **Reopen Editor With** or configure `workbench.editorAssociations` in Settings.
+
 Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
 
 For example if there is an image subfolder under your extension project workspace:
