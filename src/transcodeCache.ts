@@ -93,6 +93,7 @@ export async function ensureCachedAudio(
 
 	const fileName = await getCachedFileName(mediaUri);
 	const outputFsPath = path.join(transcodeDir.fsPath, fileName);
+	const tempFsPath = path.join(transcodeDir.fsPath, `temp_${fileName}`);
 
 	try {
 		await fs.access(outputFsPath);
@@ -106,14 +107,20 @@ export async function ensureCachedAudio(
 		// cache miss — transcode below
 	}
 
-	await transcodeForCache(
-		ffmpeg.path,
-		mediaUri.fsPath,
-		outputFsPath,
-		format,
-		oggQuality,
-		signal,
-	);
+	try {
+		await transcodeForCache(
+			ffmpeg.path,
+			mediaUri.fsPath,
+			tempFsPath,
+			format,
+			oggQuality,
+			signal,
+		);
+		await fs.rename(tempFsPath, outputFsPath);
+	} catch (err) {
+		await fs.rm(tempFsPath, { force: true }).catch(() => undefined);
+		throw err;
+	}
 
 	return {
 		uri: vscode.Uri.file(outputFsPath),
