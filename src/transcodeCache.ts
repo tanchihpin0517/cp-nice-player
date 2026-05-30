@@ -34,14 +34,23 @@ export async function cleanTranscodeDir(context: vscode.ExtensionContext): Promi
 	}
 }
 
-function sanitizeBasename(fileName: string): string {
-	const stem = path.basename(fileName, path.extname(fileName));
-	const sanitized = stem
+function sanitizeNameSegment(value: string, fallback: string): string {
+	const sanitized = value
 		.replace(/[^\w.-]+/g, '_')
 		.replace(/_+/g, '_')
 		.replace(/^_|_$/g, '');
-	const base = sanitized.length > 0 ? sanitized : 'audio';
+	const base = sanitized.length > 0 ? sanitized : fallback;
 	return base.slice(0, MAX_BASENAME_LENGTH);
+}
+
+function sanitizeFileStem(fileName: string): string {
+	const stem = path.basename(fileName, path.extname(fileName));
+	return sanitizeNameSegment(stem, 'audio');
+}
+
+function sanitizeSourceExt(fileName: string): string {
+	const ext = path.extname(fileName).slice(1).toLowerCase();
+	return sanitizeNameSegment(ext, 'bin');
 }
 
 async function computeCacheHash(
@@ -60,10 +69,11 @@ export async function getCachedFileName(mediaUri: vscode.Uri): Promise<string> {
 	const oggQuality = getCacheOggQuality();
 	const stat = await fs.stat(mediaUri.fsPath);
 	const baseName = path.basename(mediaUri.fsPath);
-	const sanitized = sanitizeBasename(baseName);
+	const fileStem = sanitizeFileStem(baseName);
+	const sourceExt = sanitizeSourceExt(baseName);
 	const hash = await computeCacheHash(mediaUri.fsPath, stat.mtimeMs, stat.size, format, oggQuality);
-	const extension = format === 'flac' ? 'flac' : 'ogg';
-	return `${sanitized}_${hash}.${extension}`;
+	const outputExt = format === 'flac' ? 'flac' : 'ogg';
+	return `${fileStem}_${sourceExt}_${hash}.${outputExt}`;
 }
 
 export async function ensureCachedAudio(
