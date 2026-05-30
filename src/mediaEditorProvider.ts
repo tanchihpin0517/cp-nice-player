@@ -28,7 +28,11 @@ export class MediaEditorProvider implements vscode.CustomReadonlyEditorProvider<
 		webviewPanel: vscode.WebviewPanel,
 		_token: vscode.CancellationToken,
 	): Promise<void> {
-		const resourceRoots = getResourceRoots(this.context.extensionUri, document.uri);
+		const resourceRoots = getResourceRoots(
+			this.context.extensionUri,
+			document.uri,
+			this.context,
+		);
 		webviewPanel.webview.options = {
 			enableScripts: true,
 			localResourceRoots: resourceRoots,
@@ -38,6 +42,7 @@ export class MediaEditorProvider implements vscode.CustomReadonlyEditorProvider<
 			webviewPanel,
 			this.context.extensionUri,
 			resourceRoots,
+			this.context,
 		);
 
 		const ffmpeg = await checkFfmpegAvailable();

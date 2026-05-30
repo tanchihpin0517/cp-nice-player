@@ -54,11 +54,28 @@
           "type": "string",
           "enum": ["cache", "stream"],
           "enumDescriptions": [
-            "Transcode to a cached file and play that when native playback fails.",
+            "Transcode to a cached audio file (FLAC or OGG) and play that when native playback fails.",
             "Serve adaptive streaming (HLS/DASH) when native playback fails."
           ],
           "default": "cache",
-          "description": "How to play media the browser cannot decode natively. Requires FFmpeg and has no effect when FFmpeg is not available. Not yet active; applies when transcoding is implemented."
+          "description": "How to play media the browser cannot decode natively. Requires FFmpeg. Cache mode transcodes to FLAC or OGG; stream mode is not yet implemented."
+        },
+        "cp-nice-player.playbackCache.format": {
+          "type": "string",
+          "enum": ["flac", "ogg"],
+          "enumDescriptions": [
+            "Lossless FLAC (default).",
+            "Ogg Vorbis; use playbackCache.oggQuality to tune quality."
+          ],
+          "default": "flac",
+          "description": "Output format for cache transcode fallback. Only used when unsupportedPlayback is cache."
+        },
+        "cp-nice-player.playbackCache.oggQuality": {
+          "type": "number",
+          "default": 6,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "libvorbis quality (FFmpeg -q:a) when playbackCache.format is ogg. Higher values mean better quality and larger files."
         }
       }
     }

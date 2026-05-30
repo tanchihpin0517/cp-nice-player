@@ -6,8 +6,13 @@ import {
 } from './ffmpeg';
 import { MEDIA_EDITOR_VIEW_TYPE, MediaEditorProvider } from './mediaEditorProvider';
 import { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
+import { cleanTranscodeDir } from './transcodeCache';
+
+let extensionContext: vscode.ExtensionContext | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
+	extensionContext = context;
+	void cleanTranscodeDir(context);
 	const configChange = vscode.workspace.onDidChangeConfiguration((event) => {
 		if (event.affectsConfiguration('cp-nice-player.ffmpegPath')) {
 			void context.globalState.update(FFMPEG_MISSING_NOTIFIED_KEY, undefined);
@@ -66,4 +71,9 @@ export function activate(context: vscode.ExtensionContext) {
 	void warmFfmpegAndNotifyOnce(context);
 }
 
-export function deactivate() {}
+export async function deactivate(): Promise<void> {
+	if (extensionContext) {
+		await cleanTranscodeDir(extensionContext);
+		extensionContext = undefined;
+	}
+}

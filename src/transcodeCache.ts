@@ -1,0 +1,114 @@
+import { createHash } from 'crypto';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as vscode from 'vscode';
+import { CacheFormat, getCacheFormat, getCacheOggQuality } from './config';
+import { FfmpegCheckResult, transcodeForCache } from './ffmpeg';
+
+const TRANSCODE_DIR_NAME = 'transcode';
+const MAX_BASENAME_LENGTH = 80;
+
+export interface CachedAudioResult {
+	uri: vscode.Uri;
+	fileName: string;
+	fsPath: string;
+	format: CacheFormat;
+}
+
+export function getTranscodeDir(context: vscode.ExtensionContext): vscode.Uri {
+	return vscode.Uri.joinPath(context.globalStorageUri, TRANSCODE_DIR_NAME);
+}
+
+export async function cleanTranscodeDir(context: vscode.ExtensionContext): Promise<void> {
+	const dir = getTranscodeDir(context);
+	try {
+		await fs.mkdir(dir.fsPath, { recursive: true });
+		const entries = await fs.readdir(dir.fsPath);
+		await Promise.all(
+			entries.map((entry) =>
+				fs.rm(path.join(dir.fsPath, entry), { recursive: true, force: true }),
+			),
+		);
+	} catch (err) {
+		console.error("cp-nice-player: failed to clean transcode dir", err);
+	}
+}
+
+function sanitizeBasename(fileName: string): string {
+	const stem = path.basename(fileName, path.extname(fileName));
+	const sanitized = stem
+		.replace(/[^\w.-]+/g, '_')
+		.replace(/_+/g, '_')
+		.replace(/^_|_$/g, '');
+	const base = sanitized.length > 0 ? sanitized : 'audio';
+	return base.slice(0, MAX_BASENAME_LENGTH);
+}
+
+async function computeCacheHash(
+	fsPath: string,
+	mtimeMs: number,
+	size: number,
+	format: CacheFormat,
+	oggQuality: number,
+): Promise<string> {
+	const payload = `${fsPath}\0${mtimeMs}\0${size}\0${format}\0${oggQuality}`;
+	return createHash('sha256').update(payload).digest('hex');
+}
+
+export async function getCachedFileName(mediaUri: vscode.Uri): Promise<string> {
+	const format = getCacheFormat();
+	const oggQuality = getCacheOggQuality();
+	const stat = await fs.stat(mediaUri.fsPath);
+	const baseName = path.basename(mediaUri.fsPath);
+	const sanitized = sanitizeBasename(baseName);
+	const hash = await computeCacheHash(mediaUri.fsPath, stat.mtimeMs, stat.size, format, oggQuality);
+	const extension = format === 'flac' ? 'flac' : 'ogg';
+	return `${sanitized}_${hash}.${extension}`;
+}
+
+export async function ensureCachedAudio(
+	context: vscode.ExtensionContext,
+	mediaUri: vscode.Uri,
+	ffmpeg: FfmpegCheckResult,
+	signal?: AbortSignal,
+): Promise<CachedAudioResult> {
+	if (!ffmpeg.available) {
+		throw new Error(ffmpeg.error ?? 'FFmpeg is not available.');
+	}
+
+	const format = getCacheFormat();
+	const oggQuality = getCacheOggQuality();
+	const transcodeDir = getTranscodeDir(context);
+	await fs.mkdir(transcodeDir.fsPath, { recursive: true });
+
+	const fileName = await getCachedFileName(mediaUri);
+	const outputFsPath = path.join(transcodeDir.fsPath, fileName);
+
+	try {
+		await fs.access(outputFsPath);
+		return {
+			uri: vscode.Uri.file(outputFsPath),
+			fileName,
+			fsPath: outputFsPath,
+			format,
+		};
+	} catch {
+		// cache miss — transcode below
+	}
+
+	await transcodeForCache(
+		ffmpeg.path,
+		mediaUri.fsPath,
+		outputFsPath,
+		format,
+		oggQuality,
+		signal,
+	);
+
+	return {
+		uri: vscode.Uri.file(outputFsPath),
+		fileName,
+		fsPath: outputFsPath,
+		format,
+	};
+}

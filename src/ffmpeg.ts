@@ -1,6 +1,7 @@
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as vscode from 'vscode';
+import { CacheFormat } from './config';
 
 const execFileAsync = promisify(execFile);
 
@@ -82,4 +83,70 @@ export async function clearFfmpegCache(
 	const ffmpeg = await checkFfmpegAvailable(true);
 	await maybeNotifyFfmpegMissingOnce(context, ffmpeg);
 	return ffmpeg;
+}
+
+function runFfmpeg(
+	ffmpegPath: string,
+	args: string[],
+	signal?: AbortSignal,
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const proc = spawn(ffmpegPath, args);
+		let stderr = '';
+
+		proc.stderr.setEncoding('utf8');
+		proc.stderr.on('data', (chunk: string) => {
+			stderr += chunk;
+		});
+
+		const onAbort = () => {
+			proc.kill('SIGTERM');
+			reject(new Error('Transcode aborted'));
+		};
+		signal?.addEventListener('abort', onAbort, { once: true });
+
+		proc.on('error', (err) => {
+			signal?.removeEventListener('abort', onAbort);
+			reject(err);
+		});
+
+		proc.on('close', (code) => {
+			signal?.removeEventListener('abort', onAbort);
+			if (signal?.aborted) {
+				reject(new Error('Transcode aborted'));
+				return;
+			}
+			if (code === 0) {
+				resolve();
+			} else {
+				const detail = stderr.trim() || `ffmpeg exited with code ${code}`;
+				reject(new Error(detail));
+			}
+		});
+	});
+}
+
+export async function transcodeForCache(
+	ffmpegPath: string,
+	inputFsPath: string,
+	outputFsPath: string,
+	format: CacheFormat,
+	oggQuality: number,
+	signal?: AbortSignal,
+): Promise<void> {
+	const args =
+		format === 'flac'
+			? ['-y', '-i', inputFsPath, '-vn', '-c:a', 'flac', outputFsPath]
+			: [
+					'-y',
+					'-i',
+					inputFsPath,
+					'-vn',
+					'-c:a',
+					'libvorbis',
+					'-q:a',
+					String(oggQuality),
+					outputFsPath,
+				];
+	return runFfmpeg(ffmpegPath, args, signal);
 }

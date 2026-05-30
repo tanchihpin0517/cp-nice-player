@@ -8,6 +8,8 @@ const debugLog = document.getElementById('debugLog');
 const debugPanel = document.getElementById('debugPanel');
 
 let debugContext = null;
+let currentSourceKind = 'native';
+let fallbackRequested = false;
 const eventLog = [];
 const MAX_LOG_ENTRIES = 30;
 
@@ -84,6 +86,26 @@ function getPlaybackErrorMessage(code) {
   return messages[code] ?? 'Playback error';
 }
 
+function requestNativeFallback(code) {
+  if (fallbackRequested || currentSourceKind !== 'native') {
+    return;
+  }
+  const debug = debugContext?.debug;
+  if (
+    !debug ||
+    debug.unsupportedPlayback !== 'cache' ||
+    !debug.unsupportedPlaybackEnabled
+  ) {
+    return;
+  }
+  if (code !== 3 && code !== 4) {
+    return;
+  }
+  fallbackRequested = true;
+  logEvent('nativePlaybackFailed', 'code=' + code);
+  vscode.postMessage({ type: 'nativePlaybackFailed', code });
+}
+
 function updateDebugPanel() {
   if (!debugContext) {
     debugGrid.innerHTML = renderDebugField('Status', 'No media loaded');
@@ -97,6 +119,11 @@ function updateDebugPanel() {
     renderDebugField('Scheme', debugContext.debug.scheme),
     renderDebugField('Webview URI', debugContext.source),
     renderDebugField('Resource roots', debugContext.debug.resourceRoots.join('\n')),
+    renderDebugField('sourceKind', debugContext.debug.sourceKind),
+    renderDebugField('cacheFileName', debugContext.debug.cacheFileName),
+    renderDebugField('cacheFsPath', debugContext.debug.cacheFsPath),
+    renderDebugField('cacheFormat', debugContext.debug.cacheFormat),
+    renderDebugField('cacheOggQuality', String(debugContext.debug.cacheOggQuality)),
     renderDebugField('ffmpeg', debugContext.debug.ffmpeg?.available ? 'available' : 'missing'),
     renderDebugField('ffmpeg.path', debugContext.debug.ffmpeg?.path),
     renderDebugField('ffmpeg.version', debugContext.debug.ffmpeg?.version),
@@ -160,6 +187,7 @@ function bindPlayerEvents(player) {
       let detail = '';
       if (eventName === 'error' && player.error) {
         detail = ERROR_LABELS[player.error.code] ?? String(player.error.code);
+        requestNativeFallback(player.error.code);
       } else if (eventName === 'loadedmetadata') {
         detail = 'duration=' + formatTime(player.duration);
       }
@@ -182,23 +210,19 @@ function bindPlayerEvents(player) {
   });
   player.addEventListener('error', () => {
     const code = player.error?.code ?? 0;
-    trackState.textContent = getPlaybackErrorMessage(code);
+    if (currentSourceKind === 'cache') {
+      trackState.textContent = getPlaybackErrorMessage(code);
+    }
   });
 }
 
-bindPlayerEvents(audioPlayer);
-updateDebugPanel();
-
-window.addEventListener('message', (event) => {
-  const message = event.data;
-  if (message?.type !== 'loadMedia') {
-    return;
-  }
-
+function loadMediaMessage(message) {
   debugContext = message;
+  currentSourceKind = message.debug?.sourceKind ?? 'native';
+  fallbackRequested = false;
   eventLog.length = 0;
   renderEventLog();
-  logEvent('loadMedia', message.name);
+  logEvent('loadMedia', message.name + ' (' + currentSourceKind + ')');
 
   trackName.textContent = message.name;
   emptyState.style.display = 'none';
@@ -218,6 +242,28 @@ window.addEventListener('message', (event) => {
   };
 
   audioPlayer.addEventListener('canplay', onCanPlay);
+}
+
+bindPlayerEvents(audioPlayer);
+updateDebugPanel();
+
+window.addEventListener('message', (event) => {
+  const message = event.data;
+
+  if (message?.type === 'transcodeStatus') {
+    if (message.status === 'started') {
+      trackState.textContent = 'Transcoding with FFmpeg…';
+    } else if (message.status === 'failed') {
+      trackState.textContent = message.error || 'Transcode failed';
+    }
+    logEvent('transcodeStatus', message.status);
+    updateDebugPanel();
+    return;
+  }
+
+  if (message?.type === 'loadMedia') {
+    loadMediaMessage(message);
+  }
 });
 
 debugPanel.addEventListener('toggle', () => {
