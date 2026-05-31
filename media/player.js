@@ -102,8 +102,8 @@ function requestNativeFallback(code) {
     return;
   }
   fallbackRequested = true;
-  logEvent('nativePlaybackFailed', 'code=' + code);
-  vscode.postMessage({ type: 'nativePlaybackFailed', code });
+  logEvent('requestCachePlayback', 'code=' + code);
+  vscode.postMessage({ type: 'requestCachePlayback', code });
 }
 
 function updateDebugPanel() {
@@ -117,7 +117,7 @@ function updateDebugPanel() {
     renderDebugField('File', debugContext.name),
     renderDebugField('Path', debugContext.debug.fsPath),
     renderDebugField('Scheme', debugContext.debug.scheme),
-    renderDebugField('Webview URI', debugContext.source),
+    renderDebugField('Playback URI', debugContext.source),
     renderDebugField('Resource roots', debugContext.debug.resourceRoots.join('\n')),
     renderDebugField('sourceKind', debugContext.debug.sourceKind),
     renderDebugField('cacheFileName', debugContext.debug.cacheFileName),

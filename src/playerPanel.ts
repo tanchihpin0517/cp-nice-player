@@ -1,10 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { CachePlaybackServer } from './cachePlaybackServer';
 import { CacheFormat, getCacheFormat, getCacheOggQuality, UnsupportedPlayback } from './config';
 import { FfmpegCheckResult } from './ffmpeg';
 import { isSupportedAudio } from './mediaTypes';
-import { ensureCachedAudio, getTranscodeDir } from './transcodeCache';
+import { getTranscodeDir } from './transcodeCache';
 
 export { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
 
@@ -47,6 +48,7 @@ export class MediaPlayerSession implements vscode.Disposable {
 	private readonly resourceRoots: vscode.Uri[];
 	private readonly extensionUri: vscode.Uri;
 	private readonly context: vscode.ExtensionContext;
+	private readonly cacheServer: CachePlaybackServer;
 	private currentMedia: vscode.Uri | undefined;
 	private currentFfmpeg: FfmpegCheckResult | undefined;
 	private currentUnsupportedPlayback: UnsupportedPlayback | undefined;
@@ -63,6 +65,7 @@ export class MediaPlayerSession implements vscode.Disposable {
 		this.extensionUri = extensionUri;
 		this.resourceRoots = resourceRoots;
 		this.context = context;
+		this.cacheServer = new CachePlaybackServer(context);
 		this.panel.webview.html = this.getHtml(this.panel.webview);
 
 		this.panel.webview.onDidReceiveMessage((message) => {
@@ -70,8 +73,8 @@ export class MediaPlayerSession implements vscode.Disposable {
 				this.postMedia(this.currentMedia, this.currentFfmpeg, this.currentUnsupportedPlayback);
 				return;
 			}
-			if (message?.type === 'nativePlaybackFailed') {
-				void this.handleNativePlaybackFailed(message.code);
+			if (message?.type === 'requestCachePlayback') {
+				void this.handleRequestCachePlayback(message.code);
 			}
 		}, undefined, this.disposables);
 
@@ -89,13 +92,14 @@ export class MediaPlayerSession implements vscode.Disposable {
 	dispose(): void {
 		this.transcodeAbort?.abort();
 		this.transcodeAbort = undefined;
+		this.cacheServer.dispose();
 		while (this.disposables.length > 0) {
 			const disposable = this.disposables.pop();
 			disposable?.dispose();
 		}
 	}
 
-	private async handleNativePlaybackFailed(code: number): Promise<void> {
+	private async handleRequestCachePlayback(code: number | undefined): Promise<void> {
 		if (
 			this.fallbackAttempted ||
 			!this.currentMedia ||
@@ -113,7 +117,7 @@ export class MediaPlayerSession implements vscode.Disposable {
 			return;
 		}
 
-		if (code !== 3 && code !== 4) {
+		if (code !== undefined && code !== 3 && code !== 4) {
 			return;
 		}
 
@@ -124,8 +128,7 @@ export class MediaPlayerSession implements vscode.Disposable {
 		this.transcodeAbort = new AbortController();
 
 		try {
-			const cached = await ensureCachedAudio(
-				this.context,
+			const cached = await this.cacheServer.preparePlayback(
 				this.currentMedia,
 				this.currentFfmpeg,
 				this.transcodeAbort.signal,
@@ -133,9 +136,9 @@ export class MediaPlayerSession implements vscode.Disposable {
 
 			this.postMedia(this.currentMedia, this.currentFfmpeg, this.currentUnsupportedPlayback, {
 				sourceKind: 'cache',
-				playbackUri: cached.uri,
-				cacheFsPath: cached.fsPath,
-				cacheFileName: cached.fileName,
+				playbackUri: cached.playbackUri,
+				cacheFsPath: cached.cacheFsPath,
+				cacheFileName: cached.cacheFileName,
 			});
 		} catch (err) {
 			if (this.transcodeAbort.signal.aborted) {
@@ -165,11 +168,12 @@ export class MediaPlayerSession implements vscode.Disposable {
 
 		const sourceKind = options.sourceKind ?? 'native';
 		const playbackUri = options.playbackUri ?? mediaUri;
+		const source = this.panel.webview.asWebviewUri(playbackUri).toString();
 
 		const message: LoadMediaMessage = {
 			type: 'loadMedia',
 			name: mediaUri.path.split('/').pop() ?? mediaUri.fsPath,
-			source: this.panel.webview.asWebviewUri(playbackUri).toString(),
+			source,
 			debug: {
 				fsPath: mediaUri.fsPath,
 				scheme: mediaUri.scheme,
