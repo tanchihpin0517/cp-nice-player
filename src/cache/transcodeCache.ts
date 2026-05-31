@@ -2,8 +2,8 @@ import { createHash } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CacheFormat, getCacheFormat, getCacheOggQuality } from './config';
-import { FfmpegCheckResult, transcodeForCache } from './ffmpeg';
+import { CacheFormat, getCacheFormat, getCacheOggQuality } from '../config';
+import { FfmpegCheckResult, transcodeForCache } from '../ffmpeg';
 
 const TRANSCODE_DIR_NAME = 'transcode';
 const MAX_BASENAME_LENGTH = 80;

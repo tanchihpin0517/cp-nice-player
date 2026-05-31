@@ -1,11 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CachePlaybackServer } from './cachePlaybackServer';
+import { CachePlaybackServer } from './cache/cachePlaybackServer';
 import { CacheFormat, getCacheFormat, getCacheOggQuality, UnsupportedPlayback } from './config';
 import { FfmpegCheckResult } from './ffmpeg';
 import { isSupportedAudio } from './mediaTypes';
-import { getTranscodeDir } from './transcodeCache';
+import { getTranscodeDir } from './cache/transcodeCache';
 
 export { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
 

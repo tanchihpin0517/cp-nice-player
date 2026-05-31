@@ -6,7 +6,7 @@ import {
 } from './ffmpeg';
 import { MEDIA_EDITOR_VIEW_TYPE, MediaEditorProvider } from './mediaEditorProvider';
 import { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
-import { cleanTranscodeDir } from './transcodeCache';
+import { cleanTranscodeDir } from './cache/transcodeCache';
 
 let extensionContext: vscode.ExtensionContext | undefined;
 

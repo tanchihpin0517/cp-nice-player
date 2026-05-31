@@ -1,7 +1,7 @@
 import * as http from 'http';
 import * as vscode from 'vscode';
-import { CacheFormat } from './config';
-import { FfmpegCheckResult } from './ffmpeg';
+import { CacheFormat } from '../config';
+import { FfmpegCheckResult } from '../ffmpeg';
 import { ensureCachedAudio } from './transcodeCache';
 
 export interface CachePlaybackResult {
