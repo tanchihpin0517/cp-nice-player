@@ -3,6 +3,13 @@ const audioPlayer = document.getElementById('audioPlayer');
 const trackName = document.getElementById('trackName');
 const trackState = document.getElementById('trackState');
 const emptyState = document.getElementById('emptyState');
+const fallbackControls = document.getElementById('fallbackControls');
+const fallbackPlayPause = document.getElementById('fallbackPlayPause');
+const fallbackSeek = document.getElementById('fallbackSeek');
+const fallbackCurrentTime = document.getElementById('fallbackCurrentTime');
+const fallbackDuration = document.getElementById('fallbackDuration');
+const fallbackVolume = document.getElementById('fallbackVolume');
+const fallbackMuted = document.getElementById('fallbackMuted');
 const debugGrid = document.getElementById('debugGrid');
 const debugLog = document.getElementById('debugLog');
 const debugPanel = document.getElementById('debugPanel');
@@ -10,8 +17,11 @@ const debugPanel = document.getElementById('debugPanel');
 let debugContext = null;
 let currentSourceKind = 'native';
 let fallbackRequested = false;
+let playbackMode = 'native';
 const eventLog = [];
 const MAX_LOG_ENTRIES = 30;
+let pendingSeekDrag = false;
+const audioEngine = new window.AudioEngine();
 
 const READY_STATE_LABELS = {
   0: 'HAVE_NOTHING (0)',
@@ -50,6 +60,13 @@ function formatBuffered(player) {
     ranges.push(formatTime(player.buffered.start(index)) + '–' + formatTime(player.buffered.end(index)));
   }
   return ranges.length ? ranges.join(', ') : '—';
+}
+
+function setPlaybackMode(mode) {
+  playbackMode = mode;
+  const webAudio = mode === 'webAudio';
+  audioPlayer.classList.toggle('is-hidden', webAudio);
+  fallbackControls.classList.toggle('is-hidden', !webAudio);
 }
 
 function logEvent(name, detail) {
@@ -113,6 +130,12 @@ function updateDebugPanel() {
   }
 
   const player = audioPlayer;
+  const engine = audioEngine.getDiagnostics();
+  const currentTime = playbackMode === 'webAudio' ? engine.currentTime : player.currentTime;
+  const duration = playbackMode === 'webAudio' ? engine.duration : player.duration;
+  const paused = playbackMode === 'webAudio' ? engine.paused : player.paused;
+  const muted = playbackMode === 'webAudio' ? engine.muted : player.muted;
+  const volume = playbackMode === 'webAudio' ? engine.volume : player.volume;
   const fields = [
     renderDebugField('File', debugContext.name),
     renderDebugField('Path', debugContext.debug.fsPath),
@@ -124,6 +147,9 @@ function updateDebugPanel() {
     renderDebugField('cacheFsPath', debugContext.debug.cacheFsPath),
     renderDebugField('cacheFormat', debugContext.debug.cacheFormat),
     renderDebugField('cacheOggQuality', String(debugContext.debug.cacheOggQuality)),
+    renderDebugField('playbackMode', playbackMode),
+    renderDebugField('playbackCodec', debugContext.debug.playbackCodec),
+    renderDebugField('contentType', debugContext.debug.contentType),
     renderDebugField('ffmpeg', debugContext.debug.ffmpeg?.available ? 'available' : 'missing'),
     renderDebugField('ffmpeg.path', debugContext.debug.ffmpeg?.path),
     renderDebugField('ffmpeg.version', debugContext.debug.ffmpeg?.version),
@@ -135,14 +161,17 @@ function updateDebugPanel() {
     ),
     renderDebugField('readyState', READY_STATE_LABELS[player.readyState] ?? player.readyState),
     renderDebugField('networkState', NETWORK_STATE_LABELS[player.networkState] ?? player.networkState),
-    renderDebugField('currentTime', formatTime(player.currentTime)),
-    renderDebugField('duration', formatTime(player.duration)),
-    renderDebugField('paused', String(player.paused)),
-    renderDebugField('ended', String(player.ended)),
+    renderDebugField('currentTime', formatTime(currentTime)),
+    renderDebugField('duration', formatTime(duration)),
+    renderDebugField('paused', String(paused)),
+    renderDebugField('ended', String(playerbackEnded(duration, currentTime, paused))),
     renderDebugField('seeking', String(player.seeking)),
-    renderDebugField('volume', player.volume.toFixed(2)),
-    renderDebugField('muted', String(player.muted)),
-    renderDebugField('buffered', formatBuffered(player)),
+    renderDebugField('volume', Number(volume).toFixed(2)),
+    renderDebugField('muted', String(muted)),
+    renderDebugField('buffered', playbackMode === 'webAudio' ? 'full file' : formatBuffered(player)),
+    renderDebugField('webAudio.contextState', engine.contextState),
+    renderDebugField('webAudio.sampleRate', String(engine.sampleRate)),
+    renderDebugField('webAudio.decoder', engine.decoderType),
   ];
 
   if (player.error) {
@@ -153,6 +182,13 @@ function updateDebugPanel() {
   }
 
   debugGrid.innerHTML = fields.join('');
+}
+
+function playerbackEnded(duration, currentTime, paused) {
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return false;
+  }
+  return paused && currentTime >= duration - 0.01;
 }
 
 function bindPlayerEvents(player) {
@@ -209,11 +245,132 @@ function bindPlayerEvents(player) {
     trackState.textContent = 'Finished';
   });
   player.addEventListener('error', () => {
+    if (playbackMode !== 'native') {
+      return;
+    }
     const code = player.error?.code ?? 0;
     if (currentSourceKind === 'cache') {
       trackState.textContent = getPlaybackErrorMessage(code);
     }
   });
+}
+
+function bindFallbackEvents() {
+  audioEngine.addEventListener('loading', () => {
+    trackState.textContent = 'Loading fallback playback...';
+    logEvent('fallback-loading');
+    updateDebugPanel();
+  });
+
+  audioEngine.addEventListener('ready', (event) => {
+    const { duration = 0, decoderType = 'unknown' } = event.detail || {};
+    trackState.textContent = 'Ready — press play';
+    fallbackDuration.textContent = formatTime(duration);
+    fallbackSeek.value = '0';
+    fallbackPlayPause.textContent = 'Play';
+    logEvent('fallback-ready', `decoder=${decoderType}`);
+    updateDebugPanel();
+  });
+
+  audioEngine.addEventListener('playing', () => {
+    fallbackPlayPause.textContent = 'Pause';
+    trackState.textContent = 'Playing (Web Audio fallback)';
+    logEvent('fallback-playing');
+    updateDebugPanel();
+  });
+
+  audioEngine.addEventListener('pause', () => {
+    fallbackPlayPause.textContent = 'Play';
+    if (!playerbackEnded(audioEngine.getDuration(), audioEngine.getCurrentTime(), true)) {
+      trackState.textContent = 'Paused (Web Audio fallback)';
+    }
+    logEvent('fallback-pause');
+    updateDebugPanel();
+  });
+
+  audioEngine.addEventListener('ended', () => {
+    fallbackPlayPause.textContent = 'Play';
+    trackState.textContent = 'Finished';
+    logEvent('fallback-ended');
+    updateDebugPanel();
+  });
+
+  audioEngine.addEventListener('timeupdate', (event) => {
+    const { currentTime = 0, duration = audioEngine.getDuration() } = event.detail || {};
+    fallbackCurrentTime.textContent = formatTime(currentTime);
+    fallbackDuration.textContent = formatTime(duration);
+    if (!pendingSeekDrag && Number.isFinite(duration) && duration > 0) {
+      fallbackSeek.value = String(currentTime / duration);
+    }
+    updateDebugPanel();
+  });
+
+  audioEngine.addEventListener('decoderwarning', (event) => {
+    const message = event.detail?.message || 'WebCodecs warning';
+    logEvent('decoderwarning', message);
+  });
+}
+
+function bindFallbackControls() {
+  fallbackPlayPause.addEventListener('click', () => {
+    if (audioEngine.getDiagnostics().paused) {
+      void audioEngine.play();
+    } else {
+      void audioEngine.pause();
+    }
+  });
+
+  fallbackSeek.addEventListener('input', () => {
+    pendingSeekDrag = true;
+    const duration = audioEngine.getDuration();
+    const next = duration * Number(fallbackSeek.value);
+    fallbackCurrentTime.textContent = formatTime(next);
+  });
+
+  fallbackSeek.addEventListener('change', () => {
+    pendingSeekDrag = false;
+    const duration = audioEngine.getDuration();
+    const next = duration * Number(fallbackSeek.value);
+    void audioEngine.seek(next);
+  });
+
+  fallbackVolume.addEventListener('input', () => {
+    audioEngine.setVolume(Number(fallbackVolume.value));
+    updateDebugPanel();
+  });
+
+  fallbackMuted.addEventListener('change', () => {
+    audioEngine.setMuted(fallbackMuted.checked);
+    updateDebugPanel();
+  });
+}
+
+async function startWebAudioFallback(message) {
+  setPlaybackMode('webAudio');
+  audioPlayer.pause();
+  audioPlayer.removeAttribute('src');
+  audioPlayer.load();
+  fallbackPlayPause.textContent = 'Play';
+  fallbackCurrentTime.textContent = '0:00';
+  fallbackDuration.textContent = '0:00';
+  fallbackSeek.value = '0';
+  fallbackVolume.value = '1';
+  fallbackMuted.checked = false;
+  audioEngine.setVolume(1);
+  audioEngine.setMuted(false);
+
+  try {
+    await audioEngine.load(message.source, {
+      codec: message.debug?.playbackCodec || 'unknown',
+      name: message.name,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    trackState.textContent = `Fallback error: ${detail}`;
+    logEvent('fallback-error', detail);
+    requestNativeFallback(3);
+    updateDebugPanel();
+  }
 }
 
 function loadMediaMessage(message) {
@@ -226,6 +383,13 @@ function loadMediaMessage(message) {
 
   trackName.textContent = message.name;
   emptyState.style.display = 'none';
+  if (currentSourceKind === 'cache') {
+    void startWebAudioFallback(message);
+    return;
+  }
+
+  setPlaybackMode('native');
+  void audioEngine.stop();
   audioPlayer.src = message.source;
   audioPlayer.load();
   trackState.textContent = 'Loading';
@@ -245,6 +409,9 @@ function loadMediaMessage(message) {
 }
 
 bindPlayerEvents(audioPlayer);
+bindFallbackEvents();
+bindFallbackControls();
+setPlaybackMode('native');
 updateDebugPanel();
 
 window.addEventListener('message', (event) => {
@@ -291,11 +458,22 @@ document.addEventListener('keydown', (event) => {
   if (event.repeat || shouldIgnoreSpaceKey(event)) {
     return;
   }
-  if (!audioPlayer.src || !debugContext) {
+  if (!debugContext) {
     return;
   }
 
   event.preventDefault();
+  if (playbackMode === 'webAudio') {
+    if (audioEngine.getDiagnostics().paused) {
+      void audioEngine.play().catch(() => {
+        logEvent('play-blocked');
+      });
+    } else {
+      void audioEngine.pause();
+    }
+    return;
+  }
+
   if (audioPlayer.paused) {
     audioPlayer.play().catch(() => {
       logEvent('play-blocked');
@@ -303,7 +481,7 @@ document.addEventListener('keydown', (event) => {
   } else {
     audioPlayer.pause();
   }
-});
+}, true);
 
 debugPanel.addEventListener('toggle', () => {
   vscode.setState({ debugOpen: debugPanel.open });

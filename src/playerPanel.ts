@@ -10,6 +10,7 @@ import { getTranscodeDir } from './cache/transcodeCache';
 export { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
 
 type SourceKind = 'native' | 'cache';
+type PlaybackCodec = 'flac' | 'mp3' | 'opus' | 'wav' | 'ogg' | 'unknown';
 
 interface LoadMediaMessage {
 	type: 'loadMedia';
@@ -24,6 +25,8 @@ interface LoadMediaMessage {
 		cacheFileName?: string;
 		cacheFormat: CacheFormat;
 		cacheOggQuality: number;
+		playbackCodec: PlaybackCodec;
+		contentType?: string;
 		ffmpeg: {
 			available: boolean;
 			path: string;
@@ -40,6 +43,45 @@ interface PostMediaOptions {
 	playbackUri?: vscode.Uri;
 	cacheFsPath?: string;
 	cacheFileName?: string;
+}
+
+function inferPlaybackCodec(playbackUri: vscode.Uri, sourceKind: SourceKind, cacheFormat: CacheFormat): PlaybackCodec {
+	if (sourceKind === 'cache') {
+		return cacheFormat === 'flac' ? 'flac' : 'ogg';
+	}
+
+	const extension = path.extname(playbackUri.fsPath).toLowerCase();
+	switch (extension) {
+		case '.flac':
+			return 'flac';
+		case '.mp3':
+			return 'mp3';
+		case '.opus':
+			return 'opus';
+		case '.wav':
+			return 'wav';
+		case '.ogg':
+			return 'ogg';
+		default:
+			return 'unknown';
+	}
+}
+
+function codecToContentType(codec: PlaybackCodec): string | undefined {
+	switch (codec) {
+		case 'flac':
+			return 'audio/flac';
+		case 'mp3':
+			return 'audio/mpeg';
+		case 'opus':
+			return 'audio/opus';
+		case 'wav':
+			return 'audio/wav';
+		case 'ogg':
+			return 'audio/ogg';
+		default:
+			return undefined;
+	}
 }
 
 export class MediaPlayerSession implements vscode.Disposable {
@@ -170,6 +212,9 @@ export class MediaPlayerSession implements vscode.Disposable {
 		const sourceKind = options.sourceKind ?? 'native';
 		const playbackUri = options.playbackUri ?? mediaUri;
 		const source = this.panel.webview.asWebviewUri(playbackUri).toString();
+		const cacheFormat = getCacheFormat();
+		const playbackCodec = inferPlaybackCodec(playbackUri, sourceKind, cacheFormat);
+		const contentType = codecToContentType(playbackCodec);
 
 		const message: LoadMediaMessage = {
 			type: 'loadMedia',
@@ -182,8 +227,10 @@ export class MediaPlayerSession implements vscode.Disposable {
 				sourceKind,
 				cacheFsPath: options.cacheFsPath,
 				cacheFileName: options.cacheFileName,
-				cacheFormat: getCacheFormat(),
+				cacheFormat,
 				cacheOggQuality: getCacheOggQuality(),
+				playbackCodec,
+				contentType,
 				ffmpeg: {
 					available: ffmpeg.available,
 					path: ffmpeg.path,
@@ -202,11 +249,13 @@ export class MediaPlayerSession implements vscode.Disposable {
 		const templatePath = vscode.Uri.joinPath(this.extensionUri, 'media', 'player.html');
 		const template = fs.readFileSync(templatePath.fsPath, 'utf8');
 		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'player.css'));
+		const audioEngineUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'audioEngine.js'));
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'player.js'));
 
 		return template
 			.replaceAll('{{cspSource}}', webview.cspSource)
 			.replaceAll('{{styleUri}}', styleUri.toString())
+			.replaceAll('{{audioEngineUri}}', audioEngineUri.toString())
 			.replaceAll('{{scriptUri}}', scriptUri.toString());
 	}
 }

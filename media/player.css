@@ -63,6 +63,70 @@ audio {
   display: block;
 }
 
+.is-hidden {
+  display: none;
+}
+
+.fallback-controls {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.fallback-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.fallback-row:last-child {
+  margin-bottom: 0;
+}
+
+.fallback-controls input[type='range'] {
+  width: 100%;
+}
+
+.fallback-controls .btn {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.fallback-controls .btn:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.fallback-controls .time {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.fallback-controls .checkbox {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .empty {
   padding: 24px;
   text-align: center;
