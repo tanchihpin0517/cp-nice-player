@@ -66,6 +66,7 @@ export class MediaPlayerSession implements vscode.Disposable {
 		this.resourceRoots = resourceRoots;
 		this.context = context;
 		this.cacheServer = new CachePlaybackServer(context);
+		this.cacheServer.start();
 		this.panel.webview.html = this.getHtml(this.panel.webview);
 
 		this.panel.webview.onDidReceiveMessage((message) => {

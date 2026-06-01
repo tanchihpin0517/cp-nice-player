@@ -15,12 +15,67 @@ export class CachePlaybackServer implements vscode.Disposable {
 	private server: http.Server | undefined;
 	private listenPromise: Promise<number> | undefined;
 	private port: number | undefined;
+	private disposed = false;
 	private currentMediaUri: vscode.Uri | undefined;
 	private currentFfmpeg: FfmpegCheckResult | undefined;
 	private currentSignal: AbortSignal | undefined;
 	private prepareInFlight: Promise<CachePlaybackResult> | undefined;
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
+
+	start(): void {
+		if (this.port !== undefined || this.listenPromise || this.disposed) {
+			return;
+		}
+
+		void vscode.window.showInformationMessage(
+			"CP's Nice Player: Cache playback server is starting.",
+		);
+
+		setImmediate(() => {
+			if (this.port !== undefined || this.listenPromise || this.disposed) {
+				return;
+			}
+
+			this.listenPromise = new Promise<number>((resolve, reject) => {
+				this.server = http.createServer((req, res) => {
+					void this.handleRequest(req, res);
+				});
+
+				this.server.on('error', reject);
+				this.server.listen(0, '127.0.0.1', () => {
+					const address = this.server?.address();
+					if (!address || typeof address === 'string') {
+						reject(new Error('Failed to bind cache playback server.'));
+						return;
+					}
+					this.port = address.port;
+					resolve(address.port);
+				});
+			});
+
+			void this.listenPromise
+				.then((port) => {
+					if (this.disposed) {
+						return;
+					}
+					void vscode.window.showInformationMessage(
+						`CP's Nice Player: Cache playback server started on 127.0.0.1:${port}.`,
+					);
+				})
+				.catch((err) => {
+					if (this.disposed) {
+						return;
+					}
+					const message = err instanceof Error ? err.message : String(err);
+					console.error('cp-nice-player: failed to start cache playback server', err);
+					void vscode.window.showErrorMessage(
+						`CP's Nice Player: Cache playback server failed to start. ${message}`,
+					);
+					this.listenPromise = undefined;
+				});
+		});
+	}
 
 	async preparePlayback(
 		mediaUri: vscode.Uri,
@@ -35,8 +90,6 @@ export class CachePlaybackServer implements vscode.Disposable {
 		this.currentFfmpeg = ffmpeg;
 		this.currentSignal = signal;
 
-		await this.ensureListening();
-
 		this.prepareInFlight = this.runPrepare(mediaUri, ffmpeg, signal);
 		try {
 			return await this.prepareInFlight;
@@ -46,6 +99,7 @@ export class CachePlaybackServer implements vscode.Disposable {
 	}
 
 	dispose(): void {
+		this.disposed = true;
 		this.prepareInFlight = undefined;
 		this.server?.close();
 		this.server = undefined;
@@ -66,33 +120,6 @@ export class CachePlaybackServer implements vscode.Disposable {
 			cacheFileName: cached.fileName,
 			format: cached.format,
 		};
-	}
-
-	private async ensureListening(): Promise<number> {
-		if (this.port !== undefined) {
-			return this.port;
-		}
-
-		if (!this.listenPromise) {
-			this.listenPromise = new Promise<number>((resolve, reject) => {
-				this.server = http.createServer((req, res) => {
-					void this.handleRequest(req, res);
-				});
-
-				this.server.on('error', reject);
-				this.server.listen(0, '127.0.0.1', () => {
-					const address = this.server?.address();
-					if (!address || typeof address === 'string') {
-						reject(new Error('Failed to bind cache playback server.'));
-						return;
-					}
-					this.port = address.port;
-					resolve(address.port);
-				});
-			});
-		}
-
-		return this.listenPromise;
 	}
 
 	private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
