@@ -6,11 +6,12 @@ import {
 } from './ffmpeg';
 import { MEDIA_EDITOR_VIEW_TYPE, MediaEditorProvider } from './mediaEditorProvider';
 import { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
-import { cleanTranscodeDir } from './cache/transcodeCache';
+import { cleanTranscodeDir } from './playback/transcode';
+import { PlaybackService } from './playback/playbackService';
 
 let extensionContext: vscode.ExtensionContext | undefined;
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
 	extensionContext = context;
 	void cleanTranscodeDir(context);
 	const configChange = vscode.workspace.onDidChangeConfiguration((event) => {
@@ -21,10 +22,18 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 	context.subscriptions.push(configChange);
 
+	const playbackService = new PlaybackService(context);
+	try {
+		await playbackService.ensureStarted();
+	} catch (err) {
+		console.error('cp-nice-player: playback server failed to start', err);
+	}
+	context.subscriptions.push(playbackService);
+
 	context.subscriptions.push(
 		vscode.window.registerCustomEditorProvider(
 			MEDIA_EDITOR_VIEW_TYPE,
-			new MediaEditorProvider(context),
+			new MediaEditorProvider(context, playbackService),
 			{
 				webviewOptions: { retainContextWhenHidden: true },
 			},

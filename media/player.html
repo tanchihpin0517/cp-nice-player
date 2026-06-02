@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} https:; media-src {{cspSource}}; connect-src {{cspSource}}; style-src {{cspSource}}; script-src {{cspSource}};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} https:; connect-src {{cspSource}} http://127.0.0.1:* http://localhost:*; style-src {{cspSource}}; script-src {{cspSource}};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CP's Nice Player</title>
   <link rel="stylesheet" href="{{styleUri}}">
@@ -17,18 +17,17 @@
         <div class="track-state" id="trackState">Waiting for a file</div>
       </div>
     </section>
-    <audio id="audioPlayer" controls preload="metadata"></audio>
-    <section class="fallback-controls is-hidden" id="fallbackControls" aria-label="Web Audio fallback controls">
-      <div class="fallback-row">
-        <button id="fallbackPlayPause" class="btn" type="button">Play</button>
-        <div class="time"><span id="fallbackCurrentTime">0:00</span> / <span id="fallbackDuration">0:00</span></div>
+    <section class="playback-controls" id="playbackControls" aria-label="Playback controls">
+      <div class="playback-row">
+        <button id="playbackPlayPause" class="btn" type="button">Play</button>
+        <div class="time"><span id="playbackCurrentTime">0:00</span> / <span id="playbackDuration">0:00</span></div>
       </div>
-      <label class="sr-only" for="fallbackSeek">Seek</label>
-      <input id="fallbackSeek" type="range" min="0" max="1" step="0.001" value="0">
-      <div class="fallback-row">
-        <label for="fallbackVolume">Volume</label>
-        <input id="fallbackVolume" type="range" min="0" max="1" step="0.01" value="1">
-        <label class="checkbox"><input id="fallbackMuted" type="checkbox"> Muted</label>
+      <label class="sr-only" for="playbackSeek">Seek</label>
+      <input id="playbackSeek" type="range" min="0" max="1" step="0.001" value="0">
+      <div class="playback-row">
+        <label for="playbackVolume">Volume</label>
+        <input id="playbackVolume" type="range" min="0" max="1" step="0.01" value="1">
+        <label class="checkbox"><input id="playbackMuted" type="checkbox"> Muted</label>
       </div>
     </section>
     <div class="empty" id="emptyState">Open an audio file and choose CP's Nice Player from the editor title or Open With menu.</div>

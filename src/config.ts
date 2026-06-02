@@ -1,25 +1,17 @@
 import * as vscode from 'vscode';
 
-export type UnsupportedPlayback = 'cache' | 'stream';
+export type PlaybackFormat = 'ogg' | 'flac';
 
-export type CacheFormat = 'ogg' | 'flac';
-
-export function getUnsupportedPlayback(): UnsupportedPlayback {
-	return vscode.workspace
-		.getConfiguration('cp-nice-player')
-		.get<UnsupportedPlayback>('unsupportedPlayback', 'cache');
-}
-
-export function getCacheFormat(): CacheFormat {
+export function getPlaybackFormat(): PlaybackFormat {
 	const value = vscode.workspace
 		.getConfiguration('cp-nice-player')
-		.get<CacheFormat>('playbackCache.format', 'flac');
-	return value === 'ogg' ? 'ogg' : 'flac';
+		.get<PlaybackFormat>('playback.format', 'ogg');
+	return value === 'flac' ? 'flac' : 'ogg';
 }
 
-export function getCacheOggQuality(): number {
+export function getPlaybackOggQuality(): number {
 	const value = vscode.workspace
 		.getConfiguration('cp-nice-player')
-		.get<number>('playbackCache.oggQuality', 6);
+		.get<number>('playback.oggQuality', 6);
 	return Math.min(10, Math.max(0, Math.round(value)));
 }

@@ -1,16 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CachePlaybackServer } from './cache/cachePlaybackServer';
-import { CacheFormat, getCacheFormat, getCacheOggQuality, UnsupportedPlayback } from './config';
+import { getPlaybackFormat, getPlaybackOggQuality, PlaybackFormat } from './config';
 import { FfmpegCheckResult } from './ffmpeg';
 import { isSupportedAudio } from './mediaTypes';
-import { getTranscodeDir } from './cache/transcodeCache';
+import { PlaybackService } from './playback/playbackService';
+import { getTranscodeDir } from './playback/transcode';
 
 export { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
 
-type SourceKind = 'native' | 'cache';
-type PlaybackCodec = 'flac' | 'mp3' | 'opus' | 'wav' | 'ogg' | 'unknown';
+type PlaybackCodec = 'flac' | 'ogg';
 
 interface LoadMediaMessage {
 	type: 'loadMedia';
@@ -20,11 +19,10 @@ interface LoadMediaMessage {
 		fsPath: string;
 		scheme: string;
 		resourceRoots: string[];
-		sourceKind: SourceKind;
-		cacheFsPath?: string;
-		cacheFileName?: string;
-		cacheFormat: CacheFormat;
-		cacheOggQuality: number;
+		transcodedFsPath?: string;
+		transcodedFileName?: string;
+		playbackFormat: PlaybackFormat;
+		playbackOggQuality: number;
 		playbackCodec: PlaybackCodec;
 		contentType?: string;
 		ffmpeg: {
@@ -33,55 +31,21 @@ interface LoadMediaMessage {
 			version?: string;
 			error?: string;
 		};
-		unsupportedPlayback: UnsupportedPlayback;
-		unsupportedPlaybackEnabled: boolean;
 	};
 }
 
-interface PostMediaOptions {
-	sourceKind?: SourceKind;
-	playbackUri?: vscode.Uri;
-	cacheFsPath?: string;
-	cacheFileName?: string;
+interface PreparedPlayback {
+	playbackUrl: string;
+	transcodedFsPath: string;
+	transcodedFileName: string;
 }
 
-function inferPlaybackCodec(playbackUri: vscode.Uri, sourceKind: SourceKind, cacheFormat: CacheFormat): PlaybackCodec {
-	if (sourceKind === 'cache') {
-		return cacheFormat === 'flac' ? 'flac' : 'ogg';
-	}
-
-	const extension = path.extname(playbackUri.fsPath).toLowerCase();
-	switch (extension) {
-		case '.flac':
-			return 'flac';
-		case '.mp3':
-			return 'mp3';
-		case '.opus':
-			return 'opus';
-		case '.wav':
-			return 'wav';
-		case '.ogg':
-			return 'ogg';
-		default:
-			return 'unknown';
-	}
+function playbackCodecForFormat(format: PlaybackFormat): PlaybackCodec {
+	return format === 'flac' ? 'flac' : 'ogg';
 }
 
-function codecToContentType(codec: PlaybackCodec): string | undefined {
-	switch (codec) {
-		case 'flac':
-			return 'audio/flac';
-		case 'mp3':
-			return 'audio/mpeg';
-		case 'opus':
-			return 'audio/opus';
-		case 'wav':
-			return 'audio/wav';
-		case 'ogg':
-			return 'audio/ogg';
-		default:
-			return undefined;
-	}
+function codecToContentType(codec: PlaybackCodec): string {
+	return codec === 'flac' ? 'audio/flac' : 'audio/ogg';
 }
 
 export class MediaPlayerSession implements vscode.Disposable {
@@ -90,101 +54,96 @@ export class MediaPlayerSession implements vscode.Disposable {
 	private readonly resourceRoots: vscode.Uri[];
 	private readonly extensionUri: vscode.Uri;
 	private readonly context: vscode.ExtensionContext;
-	private readonly cacheServer: CachePlaybackServer;
+	private readonly playbackService: PlaybackService;
 	private currentMedia: vscode.Uri | undefined;
 	private currentFfmpeg: FfmpegCheckResult | undefined;
-	private currentUnsupportedPlayback: UnsupportedPlayback | undefined;
-	private fallbackAttempted = false;
+	private lastPrepared: PreparedPlayback | undefined;
 	private transcodeAbort: AbortController | undefined;
+	private loadGeneration = 0;
 
 	constructor(
 		panel: vscode.WebviewPanel,
 		extensionUri: vscode.Uri,
 		resourceRoots: vscode.Uri[],
 		context: vscode.ExtensionContext,
+		playbackService: PlaybackService,
 	) {
 		this.panel = panel;
 		this.extensionUri = extensionUri;
 		this.resourceRoots = resourceRoots;
 		this.context = context;
-		this.cacheServer = new CachePlaybackServer(context);
-		this.cacheServer.start();
+		this.playbackService = playbackService;
 		this.panel.webview.html = this.getHtml(this.panel.webview);
 
 		this.panel.webview.onDidReceiveMessage((message) => {
-			if (message?.type === 'ready' && this.currentMedia && this.currentFfmpeg && this.currentUnsupportedPlayback) {
-				this.postMedia(this.currentMedia, this.currentFfmpeg, this.currentUnsupportedPlayback);
-				return;
-			}
-			if (message?.type === 'requestCachePlayback') {
-				void this.handleRequestCachePlayback(message.code);
+			if (message?.type === 'ready' && this.currentMedia && this.currentFfmpeg && this.lastPrepared) {
+				this.postMedia(this.currentMedia, this.currentFfmpeg, this.lastPrepared);
 			}
 		}, undefined, this.disposables);
-
-		this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
 	}
 
-	loadMedia(mediaUri: vscode.Uri, ffmpeg: FfmpegCheckResult, unsupportedPlayback: UnsupportedPlayback): void {
+	loadMedia(mediaUri: vscode.Uri, ffmpeg: FfmpegCheckResult): void {
 		this.currentMedia = mediaUri;
 		this.currentFfmpeg = ffmpeg;
-		this.currentUnsupportedPlayback = unsupportedPlayback;
-		this.fallbackAttempted = false;
-		this.postMedia(mediaUri, ffmpeg, unsupportedPlayback);
+		this.lastPrepared = undefined;
+		void this.prepareAndPlay(mediaUri, ffmpeg);
 	}
 
 	dispose(): void {
 		this.transcodeAbort?.abort();
 		this.transcodeAbort = undefined;
-		this.cacheServer.dispose();
 		while (this.disposables.length > 0) {
 			const disposable = this.disposables.pop();
 			disposable?.dispose();
 		}
 	}
 
-	private async handleRequestCachePlayback(code: number | undefined): Promise<void> {
-		if (
-			this.fallbackAttempted ||
-			!this.currentMedia ||
-			!this.currentFfmpeg ||
-			!this.currentUnsupportedPlayback
-		) {
-			return;
-		}
-
-		if (this.currentUnsupportedPlayback !== 'cache') {
-			return;
-		}
-
-		if (!this.currentFfmpeg.available) {
-			return;
-		}
-
-		if (code !== undefined && code !== 3 && code !== 4) {
-			return;
-		}
-
-		this.fallbackAttempted = true;
-		this.panel.webview.postMessage({ type: 'transcodeStatus', status: 'started' });
+	private async prepareAndPlay(mediaUri: vscode.Uri, ffmpeg: FfmpegCheckResult): Promise<void> {
+		const generation = ++this.loadGeneration;
 
 		this.transcodeAbort?.abort();
 		this.transcodeAbort = new AbortController();
+		const signal = this.transcodeAbort.signal;
+
+		this.panel.webview.postMessage({ type: 'transcodeStatus', status: 'started' });
+
+		if (!ffmpeg.available) {
+			const message = ffmpeg.error ?? 'FFmpeg is not available.';
+			this.panel.webview.postMessage({
+				type: 'transcodeStatus',
+				status: 'failed',
+				error: message,
+			});
+			void vscode.window.showErrorMessage(`CP's Nice Player: ${message}`);
+			return;
+		}
+
+		const server = this.playbackService.getServer();
+		if (!server) {
+			const message = 'Playback server is not running.';
+			this.panel.webview.postMessage({
+				type: 'transcodeStatus',
+				status: 'failed',
+				error: message,
+			});
+			return;
+		}
 
 		try {
-			const cached = await this.cacheServer.preparePlayback(
-				this.currentMedia,
-				this.currentFfmpeg,
-				this.transcodeAbort.signal,
-			);
+			const prepared = await server.preparePlayback(mediaUri, ffmpeg, signal);
+			if (generation !== this.loadGeneration || signal.aborted) {
+				return;
+			}
 
-			this.postMedia(this.currentMedia, this.currentFfmpeg, this.currentUnsupportedPlayback, {
-				sourceKind: 'cache',
-				playbackUri: cached.playbackUri,
-				cacheFsPath: cached.cacheFsPath,
-				cacheFileName: cached.cacheFileName,
-			});
+			const playback: PreparedPlayback = {
+				playbackUrl: prepared.playbackUrl,
+				transcodedFsPath: prepared.transcodedFsPath,
+				transcodedFileName: prepared.transcodedFileName,
+			};
+			this.lastPrepared = playback;
+			this.postMedia(mediaUri, ffmpeg, playback);
 		} catch (err) {
-			if (this.transcodeAbort.signal.aborted) {
+			if (generation !== this.loadGeneration || signal.aborted) {
 				return;
 			}
 			const message = err instanceof Error ? err.message : String(err);
@@ -195,50 +154,44 @@ export class MediaPlayerSession implements vscode.Disposable {
 			});
 			void vscode.window.showErrorMessage(`CP's Nice Player: transcode failed. ${message}`);
 		} finally {
-			this.transcodeAbort = undefined;
+			if (generation === this.loadGeneration) {
+				this.transcodeAbort = undefined;
+			}
 		}
 	}
 
 	private postMedia(
 		mediaUri: vscode.Uri,
 		ffmpeg: FfmpegCheckResult,
-		unsupportedPlayback: UnsupportedPlayback,
-		options: PostMediaOptions = {},
+		prepared: PreparedPlayback,
 	): void {
 		if (!isSupportedAudio(mediaUri)) {
 			return;
 		}
 
-		const sourceKind = options.sourceKind ?? 'native';
-		const playbackUri = options.playbackUri ?? mediaUri;
-		const source = this.panel.webview.asWebviewUri(playbackUri).toString();
-		const cacheFormat = getCacheFormat();
-		const playbackCodec = inferPlaybackCodec(playbackUri, sourceKind, cacheFormat);
-		const contentType = codecToContentType(playbackCodec);
+		const playbackFormat = getPlaybackFormat();
+		const playbackCodec = playbackCodecForFormat(playbackFormat);
 
 		const message: LoadMediaMessage = {
 			type: 'loadMedia',
 			name: mediaUri.path.split('/').pop() ?? mediaUri.fsPath,
-			source,
+			source: prepared.playbackUrl,
 			debug: {
 				fsPath: mediaUri.fsPath,
 				scheme: mediaUri.scheme,
 				resourceRoots: this.resourceRoots.map((root) => root.fsPath),
-				sourceKind,
-				cacheFsPath: options.cacheFsPath,
-				cacheFileName: options.cacheFileName,
-				cacheFormat,
-				cacheOggQuality: getCacheOggQuality(),
+				transcodedFsPath: prepared.transcodedFsPath,
+				transcodedFileName: prepared.transcodedFileName,
+				playbackFormat,
+				playbackOggQuality: getPlaybackOggQuality(),
 				playbackCodec,
-				contentType,
+				contentType: codecToContentType(playbackCodec),
 				ffmpeg: {
 					available: ffmpeg.available,
 					path: ffmpeg.path,
 					version: ffmpeg.version,
 					error: ffmpeg.error,
 				},
-				unsupportedPlayback,
-				unsupportedPlaybackEnabled: ffmpeg.available,
 			},
 		};
 

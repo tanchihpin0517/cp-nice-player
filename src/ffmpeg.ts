@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as vscode from 'vscode';
-import { CacheFormat } from './config';
+import { PlaybackFormat } from './config';
 
 const execFileAsync = promisify(execFile);
 
@@ -63,7 +63,7 @@ export async function maybeNotifyFfmpegMissingOnce(
 
 	const detail = ffmpeg.error ?? 'Install ffmpeg and ensure it is on your PATH.';
 	void vscode.window.showInformationMessage(
-		`FFmpeg was not found. Native playback still works; cache/stream fallback for unsupported formats is disabled. ${detail}`,
+		`FFmpeg was not found. Playback is unavailable until FFmpeg is installed. ${detail}`,
 	);
 	await context.globalState.update(FFMPEG_MISSING_NOTIFIED_KEY, true);
 }
@@ -126,11 +126,11 @@ function runFfmpeg(
 	});
 }
 
-export async function transcodeForCache(
+export async function transcodeForPlayback(
 	ffmpegPath: string,
 	inputFsPath: string,
 	outputFsPath: string,
-	format: CacheFormat,
+	format: PlaybackFormat,
 	oggQuality: number,
 	signal?: AbortSignal,
 ): Promise<void> {

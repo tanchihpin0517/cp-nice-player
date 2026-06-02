@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { getUnsupportedPlayback } from './config';
 import { checkFfmpegAvailable } from './ffmpeg';
+import { PlaybackService } from './playback/playbackService';
 import { getResourceRoots, MediaPlayerSession } from './playerPanel';
 
 export const MEDIA_EDITOR_VIEW_TYPE = 'cpNicePlayer.mediaPreview';
@@ -10,7 +10,12 @@ interface MediaCustomDocument extends vscode.CustomDocument {
 }
 
 export class MediaEditorProvider implements vscode.CustomReadonlyEditorProvider<MediaCustomDocument> {
-	constructor(private readonly context: vscode.ExtensionContext) {}
+	private readonly sessions = new WeakMap<vscode.WebviewPanel, MediaPlayerSession>();
+
+	constructor(
+		private readonly context: vscode.ExtensionContext,
+		private readonly playbackService: PlaybackService,
+	) {}
 
 	openCustomDocument(
 		uri: vscode.Uri,
@@ -28,6 +33,9 @@ export class MediaEditorProvider implements vscode.CustomReadonlyEditorProvider<
 		webviewPanel: vscode.WebviewPanel,
 		_token: vscode.CancellationToken,
 	): Promise<void> {
+		const existing = this.sessions.get(webviewPanel);
+		existing?.dispose();
+
 		const resourceRoots = getResourceRoots(
 			this.context.extensionUri,
 			document.uri,
@@ -43,9 +51,19 @@ export class MediaEditorProvider implements vscode.CustomReadonlyEditorProvider<
 			this.context.extensionUri,
 			resourceRoots,
 			this.context,
+			this.playbackService,
 		);
+		this.sessions.set(webviewPanel, session);
+
+		webviewPanel.onDidDispose(() => {
+			const current = this.sessions.get(webviewPanel);
+			if (current === session) {
+				current.dispose();
+				this.sessions.delete(webviewPanel);
+			}
+		});
 
 		const ffmpeg = await checkFfmpegAvailable();
-		session.loadMedia(document.uri, ffmpeg, getUnsupportedPlayback());
+		void session.loadMedia(document.uri, ffmpeg);
 	}
 }

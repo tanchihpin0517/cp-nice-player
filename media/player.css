@@ -58,16 +58,7 @@ h1 {
   font-size: 13px;
 }
 
-audio {
-  width: 100%;
-  display: block;
-}
-
-.is-hidden {
-  display: none;
-}
-
-.fallback-controls {
+.playback-controls {
   margin-top: 12px;
   padding: 12px;
   border: 1px solid var(--border);
@@ -75,22 +66,22 @@ audio {
   background: var(--panel);
 }
 
-.fallback-row {
+.playback-row {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 10px;
 }
 
-.fallback-row:last-child {
+.playback-row:last-child {
   margin-bottom: 0;
 }
 
-.fallback-controls input[type='range'] {
+.playback-controls input[type='range'] {
   width: 100%;
 }
 
-.fallback-controls .btn {
+.playback-controls .btn {
   border: 1px solid var(--border);
   background: var(--panel-2);
   color: var(--text);
@@ -99,17 +90,17 @@ audio {
   cursor: pointer;
 }
 
-.fallback-controls .btn:hover {
+.playback-controls .btn:hover {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
-.fallback-controls .time {
+.playback-controls .time {
   color: var(--muted);
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-.fallback-controls .checkbox {
+.playback-controls .checkbox {
   margin-left: auto;
   color: var(--muted);
   font-size: 12px;

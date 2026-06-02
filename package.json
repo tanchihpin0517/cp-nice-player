@@ -1,7 +1,7 @@
 {
   "name": "cp-nice-player",
   "displayName": "CP's Nice Player",
-  "description": "Audio player for local files with optional FFmpeg fallback for unsupported formats.",
+  "description": "Audio player for local files using FFmpeg transcode and Web Audio playback.",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.120.0"
@@ -39,34 +39,24 @@
         "cp-nice-player.ffmpegPath": {
           "type": "string",
           "default": "",
-          "description": "Optional path to the ffmpeg executable. Leave empty to use ffmpeg from PATH. FFmpeg is only required for cache/stream fallback when native playback fails."
+          "description": "Optional path to the ffmpeg executable. Leave empty to use ffmpeg from PATH. FFmpeg is required for playback."
         },
-        "cp-nice-player.unsupportedPlayback": {
-          "type": "string",
-          "enum": ["cache", "stream"],
-          "enumDescriptions": [
-            "Transcode to a cached audio file (FLAC or OGG) and play that when native playback fails.",
-            "Serve adaptive streaming (HLS/DASH) when native playback fails."
-          ],
-          "default": "cache",
-          "description": "How to play media the browser cannot decode natively. Requires FFmpeg. Cache mode transcodes to FLAC or OGG; stream mode is not yet implemented."
-        },
-        "cp-nice-player.playbackCache.format": {
+        "cp-nice-player.playback.format": {
           "type": "string",
           "enum": ["flac", "ogg"],
           "enumDescriptions": [
-            "Lossless FLAC (default).",
-            "Ogg Vorbis; use playbackCache.oggQuality to tune quality."
+            "Lossless FLAC.",
+            "Ogg Vorbis (default); use playback.oggQuality to tune quality."
           ],
-          "default": "flac",
-          "description": "Output format for cache transcode fallback. Only used when unsupportedPlayback is cache."
+          "default": "ogg",
+          "description": "Output format for FFmpeg transcode before playback."
         },
-        "cp-nice-player.playbackCache.oggQuality": {
+        "cp-nice-player.playback.oggQuality": {
           "type": "number",
           "default": 6,
           "minimum": 0,
           "maximum": 10,
-          "description": "libvorbis quality (FFmpeg -q:a) when playbackCache.format is ogg. Higher values mean better quality and larger files."
+          "description": "libvorbis quality (FFmpeg -q:a) when playback.format is ogg. Higher values mean better quality and larger files."
         }
       }
     }
