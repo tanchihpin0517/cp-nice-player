@@ -28,7 +28,7 @@
         "priority": "default",
         "selector": [
           {
-            "filenamePattern": "*.{mp3,wav,ogg,flac,m4a,aac,webm,mp4,mkv}"
+            "filenamePattern": "*.{mp3,wav,ogg,opus,flac,m4a,aac,webm,mp4,mkv}"
           }
         ]
       }
