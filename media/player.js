@@ -12,11 +12,11 @@ const debugGrid = document.getElementById('debugGrid');
 const debugLog = document.getElementById('debugLog');
 const debugPanel = document.getElementById('debugPanel');
 
+const engine = new StreamingAudioEngine();
 let debugContext = null;
+let pendingSeekDrag = false;
 const eventLog = [];
 const MAX_LOG_ENTRIES = 30;
-let pendingSeekDrag = false;
-const audioEngine = new window.AudioEngine();
 
 function formatTime(seconds) {
   if (!Number.isFinite(seconds)) {
@@ -47,165 +47,62 @@ function renderDebugField(label, value) {
   return '<dt>' + label + '</dt><dd>' + (value ?? '—') + '</dd>';
 }
 
+function setPlayButtonLabel(playing) {
+  playbackPlayPause.textContent = playing ? 'Pause' : 'Play';
+}
+
+function updateSeekUi(currentTime, duration) {
+  playbackDuration.textContent = formatTime(duration);
+  playbackCurrentTime.textContent = formatTime(currentTime);
+  if (!pendingSeekDrag && Number.isFinite(duration) && duration > 0) {
+    playbackSeek.value = String(currentTime / duration);
+  }
+}
+
 function updateDebugPanel() {
   if (!debugContext) {
     debugGrid.innerHTML = renderDebugField('Status', 'No media loaded');
     return;
   }
 
-  const engine = audioEngine.getDiagnostics();
+  const diag = engine.getDiagnostics();
+  const decoded = diag.decodedChunkIndices;
+  const bufferRange = decoded.length
+    ? decoded[0] + '–' + decoded[decoded.length - 1]
+    : '—';
+
   const fields = [
+    renderDebugField('Mode', 'Streaming playback'),
     renderDebugField('File', debugContext.name),
     renderDebugField('Path', debugContext.debug.fsPath),
-    renderDebugField('Scheme', debugContext.debug.scheme),
-    renderDebugField('Playback URL', debugContext.source),
-    renderDebugField('Resource roots', debugContext.debug.resourceRoots.join('\n')),
-    renderDebugField('transcodedFileName', debugContext.debug.transcodedFileName),
-    renderDebugField('transcodedFsPath', debugContext.debug.transcodedFsPath),
+    renderDebugField('serverUrl', debugContext.serverUrl),
+    renderDebugField('audioId', debugContext.audioId),
     renderDebugField('playbackFormat', debugContext.debug.playbackFormat),
-    renderDebugField('playbackOggQuality', String(debugContext.debug.playbackOggQuality)),
-    renderDebugField('playbackCodec', debugContext.debug.playbackCodec),
-    renderDebugField('contentType', debugContext.debug.contentType),
+    renderDebugField('chunkBufferCount', String(debugContext.debug.chunkBufferCount)),
     renderDebugField('ffmpeg', debugContext.debug.ffmpeg?.available ? 'available' : 'missing'),
-    renderDebugField('ffmpeg.path', debugContext.debug.ffmpeg?.path),
-    renderDebugField('ffmpeg.version', debugContext.debug.ffmpeg?.version),
-    renderDebugField('ffmpeg.error', debugContext.debug.ffmpeg?.error),
-    renderDebugField('currentTime', formatTime(engine.currentTime)),
-    renderDebugField('duration', formatTime(engine.duration)),
-    renderDebugField('paused', String(engine.paused)),
-    renderDebugField('ended', String(playbackEnded(engine.duration, engine.currentTime, engine.paused))),
-    renderDebugField('volume', Number(engine.volume).toFixed(2)),
-    renderDebugField('muted', String(engine.muted)),
-    renderDebugField('buffered', 'full file'),
-    renderDebugField('webAudio.contextState', engine.contextState),
-    renderDebugField('webAudio.sampleRate', String(engine.sampleRate)),
-    renderDebugField('webAudio.decoder', engine.decoderType),
+    renderDebugField('decoder', diag.decoderType),
+    renderDebugField('context', diag.contextState),
+    renderDebugField('index.strategy', diag.manifestStrategy ?? '—'),
+    renderDebugField('index.chunkCount', diag.manifestChunkCount != null ? String(diag.manifestChunkCount) : '—'),
+    renderDebugField('currentChunk', String(diag.currentChunkIndex)),
+    renderDebugField('decoded chunks', bufferRange),
+    renderDebugField('scheduled chunks', diag.scheduledChunkIndices.join(', ') || '—'),
+    renderDebugField('buffering', diag.buffering ? 'yes' : 'no'),
+    renderDebugField('playheadSec', diag.currentTime.toFixed(2)),
+    renderDebugField('durationSec', diag.duration.toFixed(2)),
   ];
 
   debugGrid.innerHTML = fields.join('');
 }
 
-function playbackEnded(duration, currentTime, paused) {
-  if (!Number.isFinite(duration) || duration <= 0) {
-    return false;
-  }
-  return paused && currentTime >= duration - 0.01;
+function setControlsEnabled(enabled) {
+  playbackPlayPause.disabled = !enabled;
+  playbackSeek.disabled = !enabled;
+  playbackVolume.disabled = !enabled;
+  playbackMuted.disabled = !enabled;
 }
 
-function bindPlaybackEvents() {
-  audioEngine.addEventListener('loading', () => {
-    trackState.textContent = 'Loading playback...';
-    logEvent('loading');
-    updateDebugPanel();
-  });
-
-  audioEngine.addEventListener('ready', (event) => {
-    const { duration = 0, decoderType = 'unknown' } = event.detail || {};
-    trackState.textContent = 'Ready — press play';
-    playbackDuration.textContent = formatTime(duration);
-    playbackSeek.value = '0';
-    playbackPlayPause.textContent = 'Play';
-    logEvent('ready', `decoder=${decoderType}`);
-    updateDebugPanel();
-  });
-
-  audioEngine.addEventListener('playing', () => {
-    playbackPlayPause.textContent = 'Pause';
-    trackState.textContent = 'Playing';
-    logEvent('playing');
-    updateDebugPanel();
-  });
-
-  audioEngine.addEventListener('pause', () => {
-    playbackPlayPause.textContent = 'Play';
-    if (!playbackEnded(audioEngine.getDuration(), audioEngine.getCurrentTime(), true)) {
-      trackState.textContent = 'Paused';
-    }
-    logEvent('pause');
-    updateDebugPanel();
-  });
-
-  audioEngine.addEventListener('ended', () => {
-    playbackPlayPause.textContent = 'Play';
-    trackState.textContent = 'Finished';
-    logEvent('ended');
-    updateDebugPanel();
-  });
-
-  audioEngine.addEventListener('timeupdate', (event) => {
-    const { currentTime = 0, duration = audioEngine.getDuration() } = event.detail || {};
-    playbackCurrentTime.textContent = formatTime(currentTime);
-    playbackDuration.textContent = formatTime(duration);
-    if (!pendingSeekDrag && Number.isFinite(duration) && duration > 0) {
-      playbackSeek.value = String(currentTime / duration);
-    }
-    updateDebugPanel();
-  });
-
-  audioEngine.addEventListener('decoderwarning', (event) => {
-    const message = event.detail?.message || 'WebCodecs warning';
-    logEvent('decoderwarning', message);
-  });
-}
-
-function bindPlaybackControls() {
-  playbackPlayPause.addEventListener('click', () => {
-    if (audioEngine.getDiagnostics().paused) {
-      void audioEngine.play();
-    } else {
-      void audioEngine.pause();
-    }
-  });
-
-  playbackSeek.addEventListener('input', () => {
-    pendingSeekDrag = true;
-    const duration = audioEngine.getDuration();
-    const next = duration * Number(playbackSeek.value);
-    playbackCurrentTime.textContent = formatTime(next);
-  });
-
-  playbackSeek.addEventListener('change', () => {
-    pendingSeekDrag = false;
-    const duration = audioEngine.getDuration();
-    const next = duration * Number(playbackSeek.value);
-    void audioEngine.seek(next);
-  });
-
-  playbackVolume.addEventListener('input', () => {
-    audioEngine.setVolume(Number(playbackVolume.value));
-    updateDebugPanel();
-  });
-
-  playbackMuted.addEventListener('change', () => {
-    audioEngine.setMuted(playbackMuted.checked);
-    updateDebugPanel();
-  });
-}
-
-async function startPlayback(message) {
-  playbackPlayPause.textContent = 'Play';
-  playbackCurrentTime.textContent = '0:00';
-  playbackDuration.textContent = '0:00';
-  playbackSeek.value = '0';
-  playbackVolume.value = '1';
-  playbackMuted.checked = false;
-  audioEngine.setVolume(1);
-  audioEngine.setMuted(false);
-
-  try {
-    await audioEngine.load(message.source, {
-      codec: message.debug?.playbackCodec || 'unknown',
-      name: message.name,
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    trackState.textContent = `Playback error: ${detail}`;
-    logEvent('error', detail);
-    updateDebugPanel();
-  }
-}
-
-function loadMediaMessage(message) {
+async function loadMediaMessage(message) {
   debugContext = message;
   eventLog.length = 0;
   renderEventLog();
@@ -213,67 +110,155 @@ function loadMediaMessage(message) {
 
   trackName.textContent = message.name;
   emptyState.style.display = 'none';
-  void startPlayback(message);
+  setControlsEnabled(false);
+  setPlayButtonLabel(false);
+  playbackSeek.value = '0';
+  playbackCurrentTime.textContent = '0:00';
+  playbackDuration.textContent = '0:00';
+  trackState.textContent = 'Loading index…';
+  updateDebugPanel();
+
+  try {
+    await engine.load(message.serverUrl, message.audioId, {
+      name: message.name,
+      chunkBufferCount: message.debug.chunkBufferCount,
+    });
+    trackState.textContent = 'Ready';
+    setControlsEnabled(true);
+    engine.setVolume(Number(playbackVolume.value));
+    engine.setMuted(playbackMuted.checked);
+    updateDebugPanel();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    trackState.textContent = 'Load error: ' + detail;
+    logEvent('error', detail);
+    updateDebugPanel();
+  }
 }
 
-bindPlaybackEvents();
-bindPlaybackControls();
+function bindControls() {
+  playbackPlayPause.addEventListener('click', () => {
+    void (async () => {
+      try {
+        if (engine.getDiagnostics().paused) {
+          trackState.textContent = 'Playing';
+          await engine.play();
+          setPlayButtonLabel(true);
+        } else {
+          await engine.pause();
+          trackState.textContent = 'Paused';
+          setPlayButtonLabel(false);
+        }
+        updateDebugPanel();
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        trackState.textContent = 'Playback error: ' + detail;
+        logEvent('error', detail);
+        updateDebugPanel();
+      }
+    })();
+  });
+
+  playbackSeek.addEventListener('input', () => {
+    pendingSeekDrag = true;
+    const duration = engine.getDuration();
+    const next = duration * Number(playbackSeek.value);
+    playbackCurrentTime.textContent = formatTime(next);
+  });
+
+  playbackSeek.addEventListener('change', () => {
+    pendingSeekDrag = false;
+    const duration = engine.getDuration();
+    const next = duration * Number(playbackSeek.value);
+    trackState.textContent = 'Seeking…';
+    void engine.seek(next).then(() => {
+      trackState.textContent = engine.getDiagnostics().paused ? 'Ready' : 'Playing';
+      setPlayButtonLabel(!engine.getDiagnostics().paused);
+      updateDebugPanel();
+    }).catch((error) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      trackState.textContent = 'Seek error: ' + detail;
+      logEvent('error', detail);
+      updateDebugPanel();
+    });
+  });
+
+  playbackVolume.addEventListener('input', () => {
+    engine.setVolume(Number(playbackVolume.value));
+    updateDebugPanel();
+  });
+
+  playbackMuted.addEventListener('change', () => {
+    engine.setMuted(playbackMuted.checked);
+    updateDebugPanel();
+  });
+}
+
+function bindEngineEvents() {
+  engine.addEventListener('loading', () => {
+    trackState.textContent = 'Loading…';
+    updateDebugPanel();
+  });
+
+  engine.addEventListener('ready', (event) => {
+    updateSeekUi(0, event.detail.duration);
+    updateDebugPanel();
+  });
+
+  engine.addEventListener('playing', () => {
+    setPlayButtonLabel(true);
+    trackState.textContent = 'Playing';
+    updateDebugPanel();
+  });
+
+  engine.addEventListener('pause', () => {
+    setPlayButtonLabel(false);
+    updateDebugPanel();
+  });
+
+  engine.addEventListener('ended', () => {
+    setPlayButtonLabel(false);
+    trackState.textContent = 'Ended';
+    updateDebugPanel();
+  });
+
+  engine.addEventListener('timeupdate', (event) => {
+    updateSeekUi(event.detail.currentTime, event.detail.duration);
+    updateDebugPanel();
+  });
+
+  engine.addEventListener('streamstatus', (event) => {
+    const { phase, status, chunkIndex, cache, bytes } = event.detail;
+    let detail = status;
+    if (chunkIndex != null) {
+      detail += ' chunk=' + chunkIndex;
+    }
+    if (cache) {
+      detail += ' cache=' + cache;
+    }
+    if (bytes != null) {
+      detail += ' bytes=' + bytes;
+    }
+    logEvent(phase, detail);
+    updateDebugPanel();
+  });
+
+  engine.addEventListener('error', (event) => {
+    logEvent('error', event.detail.message);
+    updateDebugPanel();
+  });
+}
+
+bindControls();
+bindEngineEvents();
 updateDebugPanel();
 
 window.addEventListener('message', (event) => {
   const message = event.data;
-
-  if (message?.type === 'transcodeStatus') {
-    if (message.status === 'started') {
-      trackState.textContent = 'Transcoding with FFmpeg…';
-    } else if (message.status === 'failed') {
-      trackState.textContent = message.error || 'Transcode failed';
-    }
-    logEvent('transcodeStatus', message.status);
-    updateDebugPanel();
-    return;
-  }
-
   if (message?.type === 'loadMedia') {
-    loadMediaMessage(message);
+    void loadMediaMessage(message);
   }
 });
-
-function shouldIgnoreSpaceKey(event) {
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) {
-    return true;
-  }
-  const tag = target.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
-    return true;
-  }
-  if (target.closest('summary')) {
-    return true;
-  }
-  return false;
-}
-
-document.addEventListener('keydown', (event) => {
-  if (event.code !== 'Space' && event.key !== ' ') {
-    return;
-  }
-  if (event.repeat || shouldIgnoreSpaceKey(event)) {
-    return;
-  }
-  if (!debugContext) {
-    return;
-  }
-
-  event.preventDefault();
-  if (audioEngine.getDiagnostics().paused) {
-    void audioEngine.play().catch(() => {
-      logEvent('play-blocked');
-    });
-  } else {
-    void audioEngine.pause();
-  }
-}, true);
 
 debugPanel.addEventListener('toggle', () => {
   vscode.setState({ debugOpen: debugPanel.open });

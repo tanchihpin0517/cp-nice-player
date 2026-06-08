@@ -85,11 +85,23 @@ export async function clearFfmpegCache(
 	return ffmpeg;
 }
 
+function shellQuoteArg(arg: string): string {
+	if (/^[A-Za-z0-9_./:=+-]+$/.test(arg)) {
+		return arg;
+	}
+	return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+function formatFfmpegCommand(ffmpegPath: string, args: string[]): string {
+	return [ffmpegPath, ...args.map(shellQuoteArg)].join(' ');
+}
+
 function runFfmpeg(
 	ffmpegPath: string,
 	args: string[],
 	signal?: AbortSignal,
 ): Promise<void> {
+	console.log(`cp-nice-player: ${formatFfmpegCommand(ffmpegPath, args)}`);
 	return new Promise((resolve, reject) => {
 		const proc = spawn(ffmpegPath, args);
 		let stderr = '';
@@ -126,27 +138,38 @@ function runFfmpeg(
 	});
 }
 
-export async function transcodeForPlayback(
+export interface TranscodeChunkOptions {
+	startSec: number;
+	endSec: number;
+	format: PlaybackFormat;
+	oggQuality: number;
+}
+
+export async function transcodeChunk(
 	ffmpegPath: string,
 	inputFsPath: string,
 	outputFsPath: string,
-	format: PlaybackFormat,
-	oggQuality: number,
+	options: TranscodeChunkOptions,
 	signal?: AbortSignal,
 ): Promise<void> {
+	const { startSec, endSec, format, oggQuality } = options;
+	const baseArgs = [
+		'-y',
+		'-nostats',
+		'-loglevel',
+		'quiet',
+		'-accurate_seek',
+		'-ss',
+		String(startSec),
+		'-to',
+		String(endSec),
+		'-i',
+		inputFsPath,
+		'-vn',
+	];
 	const args =
 		format === 'flac'
-			? ['-y', '-i', inputFsPath, '-vn', '-c:a', 'flac', outputFsPath]
-			: [
-					'-y',
-					'-i',
-					inputFsPath,
-					'-vn',
-					'-c:a',
-					'libvorbis',
-					'-q:a',
-					String(oggQuality),
-					outputFsPath,
-				];
+			? [...baseArgs, '-c:a', 'flac', outputFsPath]
+			: [...baseArgs, '-c:a', 'libvorbis', '-q:a', String(oggQuality), outputFsPath];
 	return runFfmpeg(ffmpegPath, args, signal);
 }

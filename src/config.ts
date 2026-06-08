@@ -15,3 +15,17 @@ export function getPlaybackOggQuality(): number {
 		.get<number>('playback.oggQuality', 6);
 	return Math.min(10, Math.max(0, Math.round(value)));
 }
+
+export function getChunkDurationSec(): number {
+	const value = vscode.workspace
+		.getConfiguration('cp-nice-player')
+		.get<number>('playback.chunkDurationSec', 1);
+	return Math.min(10, Math.max(0.5, value));
+}
+
+export function getChunkBufferCount(): number {
+	const value = vscode.workspace
+		.getConfiguration('cp-nice-player')
+		.get<number>('playback.chunkBufferCount', 5);
+	return Math.min(20, Math.max(1, Math.round(value)));
+}

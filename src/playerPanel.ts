@@ -1,30 +1,31 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { getPlaybackFormat, getPlaybackOggQuality, PlaybackFormat } from './config';
+import {
+	getChunkBufferCount,
+	getChunkDurationSec,
+	getPlaybackFormat,
+	getPlaybackOggQuality,
+	PlaybackFormat,
+} from './config';
 import { FfmpegCheckResult } from './ffmpeg';
 import { isSupportedAudio } from './mediaTypes';
 import { PlaybackService } from './playback/playbackService';
-import { getTranscodeDir } from './playback/transcode';
+import { getStreamCacheDir } from './playback/streamCache';
 
 export { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
-
-type PlaybackCodec = 'flac' | 'ogg';
 
 interface LoadMediaMessage {
 	type: 'loadMedia';
 	name: string;
-	source: string;
+	serverUrl: string;
+	audioId: string;
 	debug: {
 		fsPath: string;
-		scheme: string;
-		resourceRoots: string[];
-		transcodedFsPath?: string;
-		transcodedFileName?: string;
 		playbackFormat: PlaybackFormat;
 		playbackOggQuality: number;
-		playbackCodec: PlaybackCodec;
-		contentType?: string;
+		chunkDurationSec: number;
+		chunkBufferCount: number;
 		ffmpeg: {
 			available: boolean;
 			path: string;
@@ -32,20 +33,6 @@ interface LoadMediaMessage {
 			error?: string;
 		};
 	};
-}
-
-interface PreparedPlayback {
-	playbackUrl: string;
-	transcodedFsPath: string;
-	transcodedFileName: string;
-}
-
-function playbackCodecForFormat(format: PlaybackFormat): PlaybackCodec {
-	return format === 'flac' ? 'flac' : 'ogg';
-}
-
-function codecToContentType(codec: PlaybackCodec): string {
-	return codec === 'flac' ? 'audio/flac' : 'audio/ogg';
 }
 
 export class MediaPlayerSession implements vscode.Disposable {
@@ -57,8 +44,7 @@ export class MediaPlayerSession implements vscode.Disposable {
 	private readonly playbackService: PlaybackService;
 	private currentMedia: vscode.Uri | undefined;
 	private currentFfmpeg: FfmpegCheckResult | undefined;
-	private lastPrepared: PreparedPlayback | undefined;
-	private transcodeAbort: AbortController | undefined;
+	private currentAudioId: string | undefined;
 	private loadGeneration = 0;
 
 	constructor(
@@ -76,8 +62,13 @@ export class MediaPlayerSession implements vscode.Disposable {
 		this.panel.webview.html = this.getHtml(this.panel.webview);
 
 		this.panel.webview.onDidReceiveMessage((message) => {
-			if (message?.type === 'ready' && this.currentMedia && this.currentFfmpeg && this.lastPrepared) {
-				this.postMedia(this.currentMedia, this.currentFfmpeg, this.lastPrepared);
+			if (
+				message?.type === 'ready' &&
+				this.currentMedia &&
+				this.currentFfmpeg &&
+				this.currentAudioId
+			) {
+				this.postMedia(this.currentMedia, this.currentFfmpeg, this.currentAudioId);
 			}
 		}, undefined, this.disposables);
 	}
@@ -85,107 +76,87 @@ export class MediaPlayerSession implements vscode.Disposable {
 	loadMedia(mediaUri: vscode.Uri, ffmpeg: FfmpegCheckResult): void {
 		this.currentMedia = mediaUri;
 		this.currentFfmpeg = ffmpeg;
-		this.lastPrepared = undefined;
-		void this.prepareAndPlay(mediaUri, ffmpeg);
+		void this.registerAndPost(mediaUri, ffmpeg);
 	}
 
 	dispose(): void {
-		this.transcodeAbort?.abort();
-		this.transcodeAbort = undefined;
+		this.unregisterCurrentAudio();
 		while (this.disposables.length > 0) {
 			const disposable = this.disposables.pop();
 			disposable?.dispose();
 		}
 	}
 
-	private async prepareAndPlay(mediaUri: vscode.Uri, ffmpeg: FfmpegCheckResult): Promise<void> {
+	private unregisterCurrentAudio(): void {
+		if (!this.currentAudioId) {
+			return;
+		}
+
+		const server = this.playbackService.getServer();
+		server?.unregisterAudio(this.currentAudioId);
+		this.currentAudioId = undefined;
+	}
+
+	private async registerAndPost(mediaUri: vscode.Uri, ffmpeg: FfmpegCheckResult): Promise<void> {
 		const generation = ++this.loadGeneration;
-
-		this.transcodeAbort?.abort();
-		this.transcodeAbort = new AbortController();
-		const signal = this.transcodeAbort.signal;
-
-		this.panel.webview.postMessage({ type: 'transcodeStatus', status: 'started' });
 
 		if (!ffmpeg.available) {
 			const message = ffmpeg.error ?? 'FFmpeg is not available.';
-			this.panel.webview.postMessage({
-				type: 'transcodeStatus',
-				status: 'failed',
-				error: message,
-			});
+			void vscode.window.showErrorMessage(`CP's Nice Player: ${message}`);
+			return;
+		}
+
+		try {
+			await this.playbackService.ensureStarted();
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
 			void vscode.window.showErrorMessage(`CP's Nice Player: ${message}`);
 			return;
 		}
 
 		const server = this.playbackService.getServer();
 		if (!server) {
-			const message = 'Playback server is not running.';
-			this.panel.webview.postMessage({
-				type: 'transcodeStatus',
-				status: 'failed',
-				error: message,
-			});
+			void vscode.window.showErrorMessage("CP's Nice Player: Playback server is not running.");
 			return;
 		}
 
-		try {
-			const prepared = await server.preparePlayback(mediaUri, ffmpeg, signal);
-			if (generation !== this.loadGeneration || signal.aborted) {
-				return;
-			}
-
-			const playback: PreparedPlayback = {
-				playbackUrl: prepared.playbackUrl,
-				transcodedFsPath: prepared.transcodedFsPath,
-				transcodedFileName: prepared.transcodedFileName,
-			};
-			this.lastPrepared = playback;
-			this.postMedia(mediaUri, ffmpeg, playback);
-		} catch (err) {
-			if (generation !== this.loadGeneration || signal.aborted) {
-				return;
-			}
-			const message = err instanceof Error ? err.message : String(err);
-			this.panel.webview.postMessage({
-				type: 'transcodeStatus',
-				status: 'failed',
-				error: message,
-			});
-			void vscode.window.showErrorMessage(`CP's Nice Player: transcode failed. ${message}`);
-		} finally {
-			if (generation === this.loadGeneration) {
-				this.transcodeAbort = undefined;
-			}
+		this.unregisterCurrentAudio();
+		const audioId = await server.registerAudio(mediaUri.fsPath, ffmpeg);
+		if (generation !== this.loadGeneration) {
+			server.unregisterAudio(audioId);
+			return;
 		}
+
+		this.currentAudioId = audioId;
+		this.postMedia(mediaUri, ffmpeg, audioId);
 	}
 
 	private postMedia(
 		mediaUri: vscode.Uri,
 		ffmpeg: FfmpegCheckResult,
-		prepared: PreparedPlayback,
+		audioId: string,
 	): void {
 		if (!isSupportedAudio(mediaUri)) {
 			return;
 		}
 
-		const playbackFormat = getPlaybackFormat();
-		const playbackCodec = playbackCodecForFormat(playbackFormat);
+		const server = this.playbackService.getServer();
+		const serverUrl = server?.getServerUrl();
+		if (!serverUrl) {
+			return;
+		}
 
 		const message: LoadMediaMessage = {
 			type: 'loadMedia',
 			name: mediaUri.path.split('/').pop() ?? mediaUri.fsPath,
-			source: prepared.playbackUrl,
+			serverUrl,
+			audioId,
 			debug: {
 				fsPath: mediaUri.fsPath,
-				scheme: mediaUri.scheme,
-				resourceRoots: this.resourceRoots.map((root) => root.fsPath),
-				transcodedFsPath: prepared.transcodedFsPath,
-				transcodedFileName: prepared.transcodedFileName,
-				playbackFormat,
+				playbackFormat: getPlaybackFormat(),
 				playbackOggQuality: getPlaybackOggQuality(),
-				playbackCodec,
-				contentType: codecToContentType(playbackCodec),
+				chunkDurationSec: getChunkDurationSec(),
+				chunkBufferCount: getChunkBufferCount(),
 				ffmpeg: {
 					available: ffmpeg.available,
 					path: ffmpeg.path,
@@ -202,13 +173,15 @@ export class MediaPlayerSession implements vscode.Disposable {
 		const templatePath = vscode.Uri.joinPath(this.extensionUri, 'media', 'player.html');
 		const template = fs.readFileSync(templatePath.fsPath, 'utf8');
 		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'player.css'));
-		const audioEngineUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'audioEngine.js'));
+		const engineScriptUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'media', 'streamingAudioEngine.js'),
+		);
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'player.js'));
 
 		return template
 			.replaceAll('{{cspSource}}', webview.cspSource)
 			.replaceAll('{{styleUri}}', styleUri.toString())
-			.replaceAll('{{audioEngineUri}}', audioEngineUri.toString())
+			.replaceAll('{{engineScriptUri}}', engineScriptUri.toString())
 			.replaceAll('{{scriptUri}}', scriptUri.toString());
 	}
 }
@@ -231,8 +204,8 @@ export function getResourceRoots(
 	}
 
 	if (context) {
-		const transcodeDir = getTranscodeDir(context);
-		roots.set(transcodeDir.toString(), transcodeDir);
+		const streamCacheDir = getStreamCacheDir(context);
+		roots.set(streamCacheDir.toString(), streamCacheDir);
 	}
 
 	return [...roots.values()];

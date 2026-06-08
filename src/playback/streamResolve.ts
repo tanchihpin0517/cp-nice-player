@@ -1,0 +1,48 @@
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as vscode from 'vscode';
+import { AudioRegistry } from './audioRegistry';
+import { computeCacheDirName, getStreamCacheDir } from './streamCache';
+
+export class AudioNotFoundError extends Error {
+	constructor(audioId: string) {
+		super(`Unknown audioId: ${audioId}`);
+		this.name = 'AudioNotFoundError';
+	}
+}
+
+export class SourceNotFoundError extends Error {
+	constructor(fsPath: string) {
+		super(`Source file not found: ${fsPath}`);
+		this.name = 'SourceNotFoundError';
+	}
+}
+
+export interface StreamContext {
+	fsPath: string;
+	cacheDirName: string;
+	cacheDirFsPath: string;
+}
+
+export async function resolveStreamContext(
+	registry: AudioRegistry,
+	context: vscode.ExtensionContext,
+	audioId: string,
+): Promise<StreamContext> {
+	let fsPath: string;
+	try {
+		fsPath = registry.resolveAudioId(audioId);
+	} catch {
+		throw new AudioNotFoundError(audioId);
+	}
+
+	try {
+		await fs.access(fsPath);
+	} catch {
+		throw new SourceNotFoundError(fsPath);
+	}
+
+	const cacheDirName = await computeCacheDirName(fsPath);
+	const cacheDirFsPath = path.join(getStreamCacheDir(context).fsPath, cacheDirName);
+	return { fsPath, cacheDirName, cacheDirFsPath };
+}

@@ -10,7 +10,7 @@
 <body>
   <main class="card">
     <h1>CP's Nice Player</h1>
-    <p class="subtitle">Open a local audio file to start playback.</p>
+    <p class="subtitle">Chunked streaming playback from the local playback server.</p>
     <section class="track" aria-live="polite">
       <div>
         <div class="track-name" id="trackName">No media loaded</div>
@@ -19,15 +19,15 @@
     </section>
     <section class="playback-controls" id="playbackControls" aria-label="Playback controls">
       <div class="playback-row">
-        <button id="playbackPlayPause" class="btn" type="button">Play</button>
+        <button id="playbackPlayPause" class="btn" type="button" disabled aria-label="Play">Play</button>
         <div class="time"><span id="playbackCurrentTime">0:00</span> / <span id="playbackDuration">0:00</span></div>
       </div>
       <label class="sr-only" for="playbackSeek">Seek</label>
-      <input id="playbackSeek" type="range" min="0" max="1" step="0.001" value="0">
+      <input id="playbackSeek" type="range" min="0" max="1" step="0.001" value="0" disabled title="Seek">
       <div class="playback-row">
         <label for="playbackVolume">Volume</label>
-        <input id="playbackVolume" type="range" min="0" max="1" step="0.01" value="1">
-        <label class="checkbox"><input id="playbackMuted" type="checkbox"> Muted</label>
+        <input id="playbackVolume" type="range" min="0" max="1" step="0.01" value="1" disabled>
+        <label class="checkbox"><input id="playbackMuted" type="checkbox" disabled> Muted</label>
       </div>
     </section>
     <div class="empty" id="emptyState">Open an audio file and choose CP's Nice Player from the editor title or Open With menu.</div>
@@ -40,7 +40,7 @@
       </div>
     </details>
   </main>
-  <script src="{{audioEngineUri}}"></script>
+  <script src="{{engineScriptUri}}"></script>
   <script src="{{scriptUri}}"></script>
 </body>
 </html>
