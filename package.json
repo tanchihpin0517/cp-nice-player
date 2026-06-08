@@ -1,13 +1,24 @@
 {
   "name": "cp-nice-player",
   "displayName": "CP's Nice Player",
-  "description": "Audio player for local files using FFmpeg transcode and Web Audio playback.",
   "version": "0.0.1",
+  "publisher": "tanchihpin0517",
+  "preview": true,
+  "description": "Stream audio files inside VS Code with chunked, low-latency playback powered by FFmpeg and Web Audio.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tanchihpin0517/cp-nice-player"
+  },
   "engines": {
     "vscode": "^1.120.0"
   },
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "audio",
+    "player"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -43,7 +54,10 @@
         },
         "cp-nice-player.playback.format": {
           "type": "string",
-          "enum": ["flac", "ogg"],
+          "enum": [
+            "flac",
+            "ogg"
+          ],
           "enumDescriptions": [
             "Lossless FLAC.",
             "Ogg Vorbis (default); use playback.oggQuality to tune quality."
@@ -90,15 +104,18 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.120.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "typescript-eslint": "^8.56.1",
-    "eslint": "^9.39.3",
+    "@types/vscode": "^1.120.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
     "esbuild": "^0.27.3",
+    "eslint": "^9.39.3",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.9.3",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "typescript-eslint": "^8.56.1"
+  },
+  "dependencies": {
+    "vsce": "^2.15.0"
   }
 }
