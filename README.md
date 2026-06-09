@@ -34,11 +34,12 @@ If FFmpeg is missing, the extension shows a one-time notification with setup gui
 
 When you open a track:
 
-1. The extension registers the file with a local playback server on `127.0.0.1`.
-2. The server scans audio frames and builds an index of ~1 s, frame-aligned chunks.
-3. The player fetches the index, then requests chunks around the playhead.
-4. Each chunk is decoded to PCM in the webview and scheduled through Web Audio.
-5. On seek, in-flight fetches are cancelled and buffering reprioritizes around the new position.
+1. The extension starts a playback server on `127.0.0.1` in the environment where FFmpeg runs.
+2. It resolves the server address with `vscode.env.asExternalUri`, which triggers VS Code **port forwarding** when the UI and server are not on the same host (Remote SSH, Dev Containers, WSL, Codespaces, etc.). The webview receives that external URI and fetches chunks through the forwarded port.
+3. The server scans audio frames and builds an index of ~1 s, frame-aligned chunks.
+4. The player fetches the index, then requests chunks around the playhead.
+5. Each chunk is decoded to PCM in the webview and scheduled through Web Audio.
+6. On seek, in-flight fetches are cancelled and buffering reprioritizes around the new position.
 
 Cached chunks live under the extension's global storage and are cleared when the playback server stops or restarts.
 
@@ -56,10 +57,14 @@ Cached chunks live under the extension's global storage and are cleared when the
 ## Known limitations
 
 - **Audio only** — Video tracks are not played; only the audio stream is handled.
-- **Local playback** — Streaming is served from localhost inside VS Code, not designed for external players or network deployment.
+- **VS Code only** — Streaming is served through VS Code's port forwarding to the extension's localhost server, not for external media players or standalone network deployment.
 - **Session cache** — Chunk cache is wiped when the playback server stops or VS Code reloads the extension.
 
 ## Release notes
+
+### 0.1.2
+
+Fixes playback in remote and containerized setups by resolving the server URL through `vscode.env.asExternalUri`, which triggers VS Code port forwarding. Stream request URLs are built with the `URL` API for safe path joining.
 
 ### 0.1.1
 
