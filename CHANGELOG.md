@@ -5,6 +5,28 @@ All notable changes to **CP's Nice Player** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0] - 2026-06-09
+
+### Added
+
+- Setting `cp-nice-player.playback.fetchConcurrency` — parallel chunk downloads (default `1`, sequential low-to-high).
+- Player debug panel: fetch/decode loop state, buffered chunk ranges, active sources, and decoded chunk ranges.
+
+### Changed
+
+- **Streaming engine rewrite** — separate fetch loop (runs for the media session) and decode loop (runs while playing).
+- Decode processes all ready chunks in one iteration, then schedules the next iteration after a short idle interval (no overlapping decode polls).
+- **Pause / resume** — `AudioContext.suspend()` / `resume()` keeps scheduled sources instead of tearing them down; resume is near-instant when buffered.
+- **AudioContext lifecycle** — context opens when media loads and closes when the session ends.
+- **Decode progress state** — `decodedChunks` records which chunks have been decoded and scheduled; `activeSources` alone is not enough because finished chunks are removed from it during playback.
+- Decode starts only when at least two encoded chunks are ready in the buffer window (or all remaining chunks near track end).
+- Index manifest fetch retries until success or the load is cancelled.
+
+### Fixed
+
+- Seek while playing could stall with a moving playhead but no audio when the fetch window raced ahead of the decode target.
+- Timing and scheduling edge cases around seek, pause, and chunk boundaries.
+
 ## [0.0.1] - 2026-06-08
 
 ### Added
@@ -23,4 +45,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio only — video tracks in container files are not played.
 - Chunk cache is session-scoped and cleared when the playback server stops or restarts.
 
+[0.1.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.0
 [0.0.1]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.0.1

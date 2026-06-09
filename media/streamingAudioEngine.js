@@ -16,6 +16,32 @@ function chunkEntry(manifest, index) {
   return manifest?.chunking?.chunks?.[index];
 }
 
+function formatChunkRanges(indices) {
+  if (!indices.length) {
+    return '—';
+  }
+  const sorted = [...indices].sort((a, b) => a - b);
+  const ranges = [];
+  let start = sorted[0];
+  let end = sorted[0];
+
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i] === end + 1) {
+      end = sorted[i];
+    } else {
+      ranges.push(start === end ? String(start) : start + '-' + end);
+      start = sorted[i];
+      end = sorted[i];
+    }
+  }
+  ranges.push(start === end ? String(start) : start + '-' + end);
+  return ranges.join(', ');
+}
+
+const LOOP_INTERVAL_MS = 200;
+const DECODE_IDLE_MS = 200;
+const INDEX_RETRY_INTERVAL_MS = 1000;
+
 class StreamingAudioEngine extends EventTarget {
   constructor() {
     super();
@@ -26,11 +52,13 @@ class StreamingAudioEngine extends EventTarget {
     this.mediaName = '';
     this.manifest = null;
     this.chunkBufferCount = 5;
+    this.fetchConcurrency = 1;
     this.loadGeneration = 0;
-    this.fetchAbort = null;
-    this.decodedChunks = new Map();
-    this.chunkInFlight = new Map();
-    this.scheduledChunks = new Set();
+    this.indexFetchAbort = null;
+    this.fetchAbortControllers = new Map();
+    this.encodedChunks = new Map();
+    this.fetchInFlight = new Map();
+    this.decodedChunks = new Set();
     this.activeSources = [];
     this.nextPlayTime = 0;
     this.pausedAt = 0;
@@ -39,50 +67,47 @@ class StreamingAudioEngine extends EventTarget {
     this.volume = 1;
     this.muted = false;
     this.decoderType = 'none';
-    this._timeUpdateTimer = null;
-    this._buffering = false;
+    this._fetchTimer = null;
+    this._decodeIdleTimer = null;
+    this._timeTicker = null;
+    this._indexRetryTimer = null;
+    this._bufferedChunks = '—';
   }
 
   async load(serverUrl, audioId, options = {}) {
-    await this.close({ keepContext: true });
+    await this.close();
     this.loadGeneration += 1;
     const generation = this.loadGeneration;
     this.serverUrl = serverUrl;
     this.audioId = audioId;
     this.mediaName = options.name || '';
     this.chunkBufferCount = Math.max(1, Number(options.chunkBufferCount) || 5);
+    this.fetchConcurrency = Math.max(1, Number(options.fetchConcurrency) || 1);
     this.pausedAt = 0;
     this.decoderType = 'none';
 
     this._emit('loading', { serverUrl, audioId });
-    this._emitStreamStatus('index', 'started');
 
-    try {
-      const manifest = await this._fetchIndex(generation);
-      if (generation !== this.loadGeneration) {
-        return;
-      }
-      this.manifest = manifest;
-      this._emitStreamStatus('index', 'ready', { count: manifest.chunking.count });
-      this._emit('ready', {
-        duration: manifest.durationSec,
-        decoderType: this.decoderType,
-        manifest,
-      });
-      this._emit('timeupdate', {
-        currentTime: 0,
-        duration: manifest.durationSec,
-      });
-
-      await this._fillWindow(0, this.chunkBufferCount, generation);
-    } catch (error) {
-      if (generation !== this.loadGeneration) {
-        return;
-      }
-      this._emitStreamStatus('index', 'failed', { detail: String(error) });
-      this._emit('error', { message: String(error) });
-      throw error;
+    const manifest = await this._fetchIndexLoop(generation);
+    if (generation !== this.loadGeneration || !manifest) {
+      return;
     }
+
+    this.manifest = manifest;
+    this._openAudioContext();
+    this._emitStreamStatus('index', 'ready', { count: manifest.chunking.count });
+    this._emit('ready', {
+      duration: manifest.durationSec,
+      decoderType: this.decoderType,
+      manifest,
+    });
+    this._emit('timeupdate', {
+      currentTime: 0,
+      duration: manifest.durationSec,
+    });
+
+    this._startFetchLoop();
+    this._startDecodeLoop();
   }
 
   async play() {
@@ -90,19 +115,18 @@ class StreamingAudioEngine extends EventTarget {
       return;
     }
 
-    const ctx = this._ensureContext();
-    if (ctx.state !== 'running') {
-      await ctx.resume();
+    const resuming = this.activeSources.length > 0;
+
+    if (this.ctx.state !== 'running') {
+      await this.ctx.resume();
     }
 
-    const chunkIdx = chunkIndexForTime(this.manifest, this.pausedAt);
-    await this._ensureChunksForPlayback(chunkIdx);
-
     this.isPlaying = true;
-    this.playbackAnchorCtxTime = ctx.currentTime;
-    this.nextPlayTime = ctx.currentTime;
-    this._scheduleNextDecoded();
-    this._startTicker();
+    if (!resuming) {
+      this.playbackAnchorCtxTime = this.ctx.currentTime;
+      this.nextPlayTime = this.ctx.currentTime;
+    }
+    this._startTimeTicker();
     this._emit('playing');
   }
 
@@ -112,9 +136,8 @@ class StreamingAudioEngine extends EventTarget {
     }
     this.pausedAt = this.getCurrentTime();
     this.isPlaying = false;
-    this._stopAllSources();
-    this.scheduledChunks.clear();
-    this._stopTicker();
+    this._stopTimeTicker();
+    await this._suspendAudioContext();
     this._emit('pause');
     this._emit('timeupdate', {
       currentTime: this.pausedAt,
@@ -132,19 +155,11 @@ class StreamingAudioEngine extends EventTarget {
     const wasPlaying = this.isPlaying;
 
     this.loadGeneration += 1;
-    const generation = this.loadGeneration;
-    this._abortFetches();
+    this._abortAllFetches();
     this._stopAllSources();
-    this.scheduledChunks.clear();
+    this.decodedChunks.clear();
     this.pausedAt = clamped;
     this.isPlaying = false;
-    this._stopTicker();
-
-    const chunkIdx = chunkIndexForTime(this.manifest, clamped);
-    await this._fillWindow(chunkIdx, this.chunkBufferCount, generation);
-    if (generation !== this.loadGeneration) {
-      return;
-    }
 
     this._emit('timeupdate', {
       currentTime: this.pausedAt,
@@ -170,7 +185,10 @@ class StreamingAudioEngine extends EventTarget {
     if (!this.manifest) {
       return 0;
     }
-    if (!this.isPlaying || !this.ctx) {
+    if (!this.isPlaying) {
+      return this.pausedAt;
+    }
+    if (this.activeSources.length === 0) {
       return this.pausedAt;
     }
     const elapsed = this.ctx.currentTime - this.playbackAnchorCtxTime;
@@ -182,12 +200,12 @@ class StreamingAudioEngine extends EventTarget {
   }
 
   getDiagnostics() {
-    const decoded = [...this.decodedChunks.keys()].sort((a, b) => a - b);
+    const fetchInFlight = [...this.fetchInFlight.keys()].sort((a, b) => a - b);
     const currentChunk = this.manifest ? chunkIndexForTime(this.manifest, this.getCurrentTime()) : 0;
     return {
       mode: 'streaming',
-      contextState: this.ctx?.state ?? 'uninitialized',
-      sampleRate: this.ctx?.sampleRate ?? 0,
+      contextState: this.manifest ? this.ctx.state : 'uninitialized',
+      sampleRate: this.manifest ? this.ctx.sampleRate : 0,
       currentTime: this.getCurrentTime(),
       duration: this.getDuration(),
       paused: !this.isPlaying,
@@ -198,40 +216,105 @@ class StreamingAudioEngine extends EventTarget {
       serverUrl: this.serverUrl,
       audioId: this.audioId,
       chunkBufferCount: this.chunkBufferCount,
+      fetchConcurrency: this.fetchConcurrency,
       currentChunkIndex: currentChunk,
-      decodedChunkIndices: decoded,
-      scheduledChunkIndices: [...this.scheduledChunks].sort((a, b) => a - b),
+      fetchInFlight: formatChunkRanges(fetchInFlight),
+      fetchLoopActive: this._fetchTimer != null,
+      decodeLoopActive: this.manifest != null,
+      activeSources: formatChunkRanges(
+        this.activeSources
+          .map((source) => source._chunkIndex)
+          .filter((index) => index != null),
+      ),
+      decodedChunks: formatChunkRanges([...this.decodedChunks].sort((a, b) => a - b)),
       nextPlayTime: this.nextPlayTime,
       manifestStrategy: this.manifest?.chunking?.strategy,
       manifestChunkCount: this.manifest?.chunking?.count,
-      buffering: this._buffering,
+      bufferedChunks: this._bufferedChunks,
     };
   }
 
-  async close(options = {}) {
+  async close() {
     this.loadGeneration += 1;
-    this._abortFetches();
-    await this.pause();
+    this._stopFetchLoop();
+    this._stopDecodeLoop();
+    this._stopTimeTicker();
+    this._abortAllFetches();
+    this._abortIndexFetch();
+    this._clearIndexRetryTimer();
+    this.isPlaying = false;
+    this._stopAllSources();
     this.manifest = null;
+    this.encodedChunks.clear();
+    this._bufferedChunks = '—';
+    this.fetchInFlight.clear();
     this.decodedChunks.clear();
-    this.chunkInFlight.clear();
-    this.scheduledChunks.clear();
     this.serverUrl = '';
     this.audioId = '';
-    if (!options.keepContext && this.ctx) {
+    if (this.ctx) {
       await this.ctx.close();
       this.ctx = null;
       this.gainNode = null;
     }
   }
 
+  _getBufferWindow() {
+    const currentChunk = chunkIndexForTime(this.manifest, this.getCurrentTime());
+    const targetEnd = Math.min(
+      currentChunk + this.chunkBufferCount - 1,
+      this.manifest.chunking.count - 1,
+    );
+    return { currentChunk, targetEnd };
+  }
+
   _streamQuery() {
     return 'audioId=' + encodeURIComponent(this.audioId);
   }
 
+  async _fetchIndexLoop(generation) {
+    while (generation === this.loadGeneration) {
+      this._emitStreamStatus('index', 'started');
+      try {
+        const manifest = await this._fetchIndex(generation);
+        if (generation !== this.loadGeneration) {
+          return null;
+        }
+        return manifest;
+      } catch (error) {
+        if (generation !== this.loadGeneration || error?.name === 'AbortError') {
+          return null;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        this._emitStreamStatus('index', 'failed', { detail: message });
+        this._emit('error', { message });
+        await this._waitIndexRetry();
+      }
+    }
+    return null;
+  }
+
+  _waitIndexRetry() {
+    return new Promise((resolve) => {
+      this._clearIndexRetryTimer();
+      this._indexRetryTimer = setTimeout(() => {
+        this._indexRetryTimer = null;
+        resolve();
+      }, INDEX_RETRY_INTERVAL_MS);
+    });
+  }
+
+  _clearIndexRetryTimer() {
+    if (this._indexRetryTimer) {
+      clearTimeout(this._indexRetryTimer);
+      this._indexRetryTimer = null;
+    }
+  }
+
   async _fetchIndex(generation) {
+    this._abortIndexFetch();
+    this.indexFetchAbort = new AbortController();
     const response = await fetch(this.serverUrl + '/index?' + this._streamQuery(), {
-      signal: this._createFetchSignal(),
+      signal: this.indexFetchAbort.signal,
     });
     if (generation !== this.loadGeneration) {
       throw new DOMException('Aborted', 'AbortError');
@@ -243,175 +326,230 @@ class StreamingAudioEngine extends EventTarget {
     return response.json();
   }
 
-  async _fetchAndDecodeChunk(index, generation) {
-    if (this.decodedChunks.has(index)) {
-      return this.decodedChunks.get(index);
+  _maintainEncodedWindow() {
+    if (!this.manifest) {
+      return;
     }
-    const inFlight = this.chunkInFlight.get(index);
+    const generation = this.loadGeneration;
+    const { currentChunk, targetEnd } = this._getBufferWindow();
+
+    let inFlightInWindow = 0;
+    for (let index = currentChunk; index <= targetEnd; index += 1) {
+      if (this.fetchInFlight.has(index)) {
+        inFlightInWindow += 1;
+      }
+    }
+    const slotsAvailable = Math.max(0, this.fetchConcurrency - inFlightInWindow);
+    let started = 0;
+
+    for (let index = currentChunk; index <= targetEnd; index += 1) {
+      if (started >= slotsAvailable) {
+        break;
+      }
+      if (this.encodedChunks.has(index) || this.fetchInFlight.has(index)) {
+        continue;
+      }
+      void this._fetchChunk(index, generation).catch((error) => {
+        if (error?.name !== 'AbortError') {
+          this._emit('error', { message: String(error) });
+        }
+      });
+      started += 1;
+    }
+
+    this._updateBufferingState();
+  }
+
+  _nextChunkToSchedule() {
+    if (this.decodedChunks.size > 0) {
+      return Math.max(...this.decodedChunks) + 1;
+    }
+    return chunkIndexForTime(this.manifest, this.pausedAt);
+  }
+
+  _countEncodableChunks(first, targetEnd) {
+    let pending = 0;
+    let ready = 0;
+    for (let index = first; index <= targetEnd; index += 1) {
+      if (this.decodedChunks.has(index)) {
+        continue;
+      }
+      pending += 1;
+      if (this.encodedChunks.has(index)) {
+        ready += 1;
+      }
+    }
+    return { pending, ready };
+  }
+
+  async _decodeAvailableChunks(generation) {
+    if (!this.isPlaying) {
+      return;
+    }
+
+    const { targetEnd } = this._getBufferWindow();
+    const first = this._nextChunkToSchedule();
+    if (first == null) {
+      return;
+    }
+
+    const { pending, ready } = this._countEncodableChunks(first, targetEnd);
+    const required = Math.min(2, pending);
+    if (ready < required) {
+      return;
+    }
+
+    for (let index = first; index <= targetEnd; index += 1) {
+      if (generation !== this.loadGeneration) {
+        break;
+      }
+      if (this.decodedChunks.has(index)) {
+        continue;
+      }
+      if (!this.encodedChunks.has(index)) {
+        continue;
+      }
+
+      await this._decodeAndScheduleChunk(index, generation);
+    }
+  }
+
+  async _runDecodeIteration(generation) {
+    if (!this.manifest) {
+      return;
+    }
+
+    try {
+      if (generation === this.loadGeneration) {
+        await this._decodeAvailableChunks(generation);
+      }
+    } catch (error) {
+      this._emit('error', { message: String(error) });
+    } finally {
+      if (this.manifest) {
+        this._scheduleDecodeIteration();
+      }
+    }
+  }
+
+  _scheduleDecodeIteration() {
+    this._clearDecodeIdleTimer();
+    if (!this.manifest) {
+      return;
+    }
+
+    this._decodeIdleTimer = setTimeout(() => {
+      this._decodeIdleTimer = null;
+      void this._runDecodeIteration(this.loadGeneration);
+    }, DECODE_IDLE_MS);
+  }
+
+  _clearDecodeIdleTimer() {
+    if (this._decodeIdleTimer) {
+      clearTimeout(this._decodeIdleTimer);
+      this._decodeIdleTimer = null;
+    }
+  }
+
+  _updateBufferingState() {
+    const buffered = [...this.encodedChunks.keys()];
+    this._bufferedChunks = formatChunkRanges(buffered);
+  }
+
+  async _fetchChunk(index, generation) {
+    if (this.encodedChunks.has(index)) {
+      return this.encodedChunks.get(index);
+    }
+    const inFlight = this.fetchInFlight.get(index);
     if (inFlight) {
       return inFlight;
     }
 
     const task = (async () => {
       this._emitStreamStatus('chunk', 'started', { chunkIndex: index });
-      const response = await fetch(
-        this.serverUrl + '/chunk/' + index + '?' + this._streamQuery(),
-        { signal: this._createFetchSignal() },
-      );
-      if (generation !== this.loadGeneration) {
-        throw new DOMException('Aborted', 'AbortError');
-      }
-      if (!response.ok) {
-        const body = await response.text();
-        throw new Error('chunk ' + index + ' ' + response.status + ': ' + body);
-      }
+      const controller = new AbortController();
+      this.fetchAbortControllers.set(index, controller);
 
-      const bytes = await response.arrayBuffer();
-      const entry = chunkEntry(this.manifest, index);
-      const audioBuffer = await this._decodeChunk(bytes);
-      const decoded = {
-        index,
-        audioBuffer,
-        startSec: entry?.startSec ?? 0,
-        endSec: entry?.endSec ?? audioBuffer.duration,
-      };
-      this.decodedChunks.set(index, decoded);
-      this._evictOldChunks(chunkIndexForTime(this.manifest, this.getCurrentTime()));
-      this._emitStreamStatus('chunk', 'ready', {
-        chunkIndex: index,
-        cache: response.headers.get('X-Cache') || 'unknown',
-        bytes: bytes.byteLength,
-      });
+      try {
+        const response = await fetch(
+          this.serverUrl + '/chunk/' + index + '?' + this._streamQuery(),
+          { signal: controller.signal },
+        );
+        if (generation !== this.loadGeneration) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error('chunk ' + index + ' ' + response.status + ': ' + body);
+        }
 
-      if (this.isPlaying) {
-        this._scheduleNextDecoded();
+        const bytes = await response.arrayBuffer();
+        if (generation !== this.loadGeneration) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+
+        this.encodedChunks.set(index, bytes);
+        this._updateBufferingState();
+        this._emitStreamStatus('chunk', 'fetched', {
+          chunkIndex: index,
+          cache: response.headers.get('X-Cache') || 'unknown',
+          bytes: bytes.byteLength,
+        });
+        return bytes;
+      } finally {
+        this.fetchAbortControllers.delete(index);
       }
-      return decoded;
     })().finally(() => {
-      this.chunkInFlight.delete(index);
+      this.fetchInFlight.delete(index);
     });
 
-    this.chunkInFlight.set(index, task);
+    this.fetchInFlight.set(index, task);
     return task;
   }
 
-  async _fillWindow(startIndex, count, generation) {
-    if (!this.manifest || generation !== this.loadGeneration) {
-      return;
+  async _decodeAndScheduleChunk(index, generation) {
+    if (this.decodedChunks.has(index)) {
+      return null;
     }
-    const maxChunk = this.manifest.chunking.count - 1;
-    const start = Math.min(Math.max(0, startIndex), maxChunk);
-    const end = Math.min(start + count - 1, maxChunk);
-    this._buffering = true;
+
+    const bytes = this.encodedChunks.get(index);
+    if (!bytes) {
+      return null;
+    }
+
+    this._emitStreamStatus('decode', 'started', { chunkIndex: index });
 
     try {
-      for (let index = start; index <= end; index += 1) {
-        if (generation !== this.loadGeneration) {
-          return;
-        }
-        await this._fetchAndDecodeChunk(index, generation);
-      }
-    } finally {
-      if (generation === this.loadGeneration) {
-        this._buffering = false;
-      }
-    }
-  }
-
-  async _ensureChunksForPlayback(startChunkIndex) {
-    const generation = this.loadGeneration;
-    await this._fillWindow(startChunkIndex, this.chunkBufferCount, generation);
-    if (!this.decodedChunks.has(startChunkIndex)) {
-      throw new Error('Failed to buffer chunk ' + startChunkIndex);
-    }
-  }
-
-  async _topUpBuffer() {
-    if (!this.manifest || !this.isPlaying) {
-      return;
-    }
-    const generation = this.loadGeneration;
-    const currentChunk = chunkIndexForTime(this.manifest, this.getCurrentTime());
-    const targetEnd = Math.min(
-      currentChunk + this.chunkBufferCount - 1,
-      this.manifest.chunking.count - 1,
-    );
-
-    let highestDecoded = -1;
-    for (const index of this.decodedChunks.keys()) {
-      highestDecoded = Math.max(highestDecoded, index);
-    }
-
-    if (highestDecoded >= targetEnd) {
-      return;
-    }
-
-    const fillStart = Math.max(highestDecoded + 1, currentChunk);
-    const fillCount = targetEnd - fillStart + 1;
-    if (fillCount > 0) {
-      await this._fillWindow(fillStart, fillCount, generation);
-    }
-  }
-
-  _nextChunkToSchedule() {
-    if (this.scheduledChunks.size === 0) {
-      return chunkIndexForTime(this.manifest, this.pausedAt);
-    }
-    return Math.max(...this.scheduledChunks) + 1;
-  }
-
-  _scheduleNextDecoded(firstOffsetSec = 0) {
-    if (!this.manifest || !this.isPlaying) {
-      return;
-    }
-    const nextIndex = this._nextChunkToSchedule();
-    if (!this.decodedChunks.has(nextIndex)) {
-      return;
-    }
-    const offset = this.scheduledChunks.size === 0
-      ? Math.max(0, this.pausedAt - chunkEntry(this.manifest, nextIndex).startSec)
-      : 0;
-    this._scheduleFromIndex(nextIndex, firstOffsetSec || offset);
-  }
-
-  _scheduleFromIndex(startIndex, firstOffsetSec) {
-    if (!this.manifest || !this.isPlaying || !this.ctx) {
-      return;
-    }
-
-    const ctx = this.ctx;
-    if (this.nextPlayTime < ctx.currentTime) {
-      this.nextPlayTime = ctx.currentTime;
-    }
-
-    const maxChunk = this.manifest.chunking.count - 1;
-    let scheduleTime = this.nextPlayTime;
-    let isFirst = true;
-
-    for (let index = startIndex; index <= maxChunk; index += 1) {
-      if (this.scheduledChunks.has(index)) {
-        isFirst = false;
-        continue;
+      const audioBuffer = await this._decodeBytes(bytes);
+      if (generation !== this.loadGeneration) {
+        return null;
       }
 
-      const decoded = this.decodedChunks.get(index);
-      if (!decoded) {
-        break;
+      if (this.nextPlayTime < this.ctx.currentTime) {
+        this.nextPlayTime = this.ctx.currentTime;
       }
 
-      const offsetSec = isFirst ? Math.min(firstOffsetSec, decoded.audioBuffer.duration) : 0;
-      const playDuration = Math.max(0, decoded.audioBuffer.duration - offsetSec);
+      const offsetSec = this.activeSources.length === 0
+        ? Math.min(
+          Math.max(0, this.pausedAt - chunkEntry(this.manifest, index).startSec),
+          audioBuffer.duration,
+        )
+        : 0;
+      const playDuration = Math.max(0, audioBuffer.duration - offsetSec);
       if (playDuration <= 0) {
-        isFirst = false;
-        continue;
+        return null;
       }
 
-      const source = ctx.createBufferSource();
-      source.buffer = decoded.audioBuffer;
-      source.connect(this._ensureGainNode());
-      source.start(scheduleTime, offsetSec);
+      const source = this.ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source._chunkIndex = index;
+      source.connect(this.gainNode);
+      source.start(this.nextPlayTime, offsetSec);
       this.activeSources.push(source);
-      this.scheduledChunks.add(index);
+      this.nextPlayTime += playDuration;
+      this.decodedChunks.add(index);
+
+      this._emitStreamStatus('decode', 'ready', { chunkIndex: index });
 
       source.onended = () => {
         this._removeSource(source);
@@ -423,8 +561,9 @@ class StreamingAudioEngine extends EventTarget {
         if (atEnd) {
           this.isPlaying = false;
           this.pausedAt = 0;
-          this.scheduledChunks.clear();
-          this._stopTicker();
+          this._stopTimeTicker();
+          this._stopAllSources();
+          this.decodedChunks.clear();
           this._emit('ended');
           this._emit('timeupdate', {
             currentTime: 0,
@@ -433,11 +572,12 @@ class StreamingAudioEngine extends EventTarget {
         }
       };
 
-      scheduleTime += playDuration;
-      isFirst = false;
+      return index;
+    } 
+    catch (error) {
+      this._emit('error', { message: String(error) });
+      return null;
     }
-
-    this.nextPlayTime = scheduleTime;
   }
 
   _removeSource(source) {
@@ -459,28 +599,29 @@ class StreamingAudioEngine extends EventTarget {
     }
     this.activeSources = [];
   }
-
-  _evictOldChunks(currentChunkIndex) {
-    const keepFrom = currentChunkIndex - 2;
-    for (const index of [...this.decodedChunks.keys()]) {
-      if (index < keepFrom && !this.scheduledChunks.has(index)) {
-        this.decodedChunks.delete(index);
-      }
+  
+  async _suspendAudioContext() {
+    if (this.ctx.state === 'running') {
+      this.playbackAnchorCtxTime = this.ctx.currentTime;
+      await this.ctx.suspend();
     }
   }
 
-  _abortFetches() {
-    this.fetchAbort?.abort();
-    this.fetchAbort = null;
+  _abortAllFetches() {
+    for (const controller of this.fetchAbortControllers.values()) {
+      controller.abort();
+    }
+    this.fetchAbortControllers.clear();
+    this.fetchInFlight.clear();
   }
 
-  _createFetchSignal() {
-    this._abortFetches();
-    this.fetchAbort = new AbortController();
-    return this.fetchAbort.signal;
+  _abortIndexFetch() {
+    this._clearIndexRetryTimer();
+    this.indexFetchAbort?.abort();
+    this.indexFetchAbort = null;
   }
 
-  async _decodeChunk(bytes) {
+  async _decodeBytes(bytes) {
     const codec = this.manifest?.encode?.codec || 'unknown';
     const canUseWebCodecs = await this._canUseWebCodecs(codec);
     if (canUseWebCodecs) {
@@ -493,9 +634,8 @@ class StreamingAudioEngine extends EventTarget {
       }
     }
 
-    const ctx = this._ensureContext();
     const cloned = bytes.slice(0);
-    const decoded = await ctx.decodeAudioData(cloned);
+    const decoded = await this.ctx.decodeAudioData(cloned);
     this.decoderType = 'decodeAudioData';
     return decoded;
   }
@@ -520,7 +660,6 @@ class StreamingAudioEngine extends EventTarget {
   }
 
   async _decodeWithWebCodecs(bytes, codec) {
-    const ctx = this._ensureContext();
     const frames = [];
     let sampleRate = 0;
     let numberOfChannels = 0;
@@ -566,7 +705,7 @@ class StreamingAudioEngine extends EventTarget {
       throw new Error('WebCodecs decode produced no frames.');
     }
 
-    const buffer = ctx.createBuffer(numberOfChannels, totalFrames, sampleRate);
+    const buffer = this.ctx.createBuffer(numberOfChannels, totalFrames, sampleRate);
     let offset = 0;
     for (const frame of frames) {
       for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex += 1) {
@@ -577,21 +716,11 @@ class StreamingAudioEngine extends EventTarget {
     return buffer;
   }
 
-  _ensureContext() {
-    if (!this.ctx) {
-      this.ctx = new AudioContext();
-      this._ensureGainNode();
-    }
-    return this.ctx;
-  }
-
-  _ensureGainNode() {
-    if (!this.gainNode) {
-      this.gainNode = this._ensureContext().createGain();
-      this.gainNode.connect(this.ctx.destination);
-      this._syncGain();
-    }
-    return this.gainNode;
+  _openAudioContext() {
+    this.ctx = new AudioContext();
+    this.gainNode = this.ctx.createGain();
+    this.gainNode.connect(this.ctx.destination);
+    this._syncGain();
   }
 
   _syncGain() {
@@ -601,32 +730,46 @@ class StreamingAudioEngine extends EventTarget {
     this.gainNode.gain.value = this.muted ? 0 : this.volume;
   }
 
-  _startTicker() {
-    this._stopTicker();
-    this._timeUpdateTimer = setInterval(() => {
-      if (!this.manifest) {
-        return;
-      }
-      const currentTime = this.getCurrentTime();
-      this._emit('timeupdate', {
-        currentTime,
-        duration: this.getDuration(),
-      });
-      void this._topUpBuffer().then(() => {
-        if (this.isPlaying) {
-          this._scheduleNextDecoded();
-        }
-      }).catch((error) => {
-        this._emit('error', { message: String(error) });
-      });
-      this._evictOldChunks(chunkIndexForTime(this.manifest, currentTime));
-    }, 200);
+  _startFetchLoop() {
+    this._stopFetchLoop();
+    this._fetchTimer = setInterval(() => {
+      this._maintainEncodedWindow();
+    }, LOOP_INTERVAL_MS);
+    this._maintainEncodedWindow();
   }
 
-  _stopTicker() {
-    if (this._timeUpdateTimer) {
-      clearInterval(this._timeUpdateTimer);
-      this._timeUpdateTimer = null;
+  _stopFetchLoop() {
+    if (this._fetchTimer) {
+      clearInterval(this._fetchTimer);
+      this._fetchTimer = null;
+    }
+  }
+
+  _startDecodeLoop() {
+    void this._runDecodeIteration(this.loadGeneration);
+  }
+
+  _stopDecodeLoop() {
+    this._clearDecodeIdleTimer();
+  }
+
+  _startTimeTicker() {
+    this._stopTimeTicker();
+    this._timeTicker = setInterval(() => {
+      if (!this.isPlaying) {
+        return;
+      }
+      this._emit('timeupdate', {
+        currentTime: this.getCurrentTime(),
+        duration: this.getDuration(),
+      });
+    }, LOOP_INTERVAL_MS);
+  }
+
+  _stopTimeTicker() {
+    if (this._timeTicker) {
+      clearInterval(this._timeTicker);
+      this._timeTicker = null;
     }
   }
 

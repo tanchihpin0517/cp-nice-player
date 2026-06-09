@@ -51,6 +51,7 @@ Cached chunks live under the extension's global storage and are cleared when the
 | `cp-nice-player.playback.oggQuality` | `6` | libvorbis quality (`0`–`10`) when format is `ogg`. Higher is better quality and larger chunks. |
 | `cp-nice-player.playback.chunkDurationSec` | `1` | Target duration of each streamed chunk in seconds (`0.5`–`10`). |
 | `cp-nice-player.playback.chunkBufferCount` | `5` | Number of chunks to buffer ahead of the playhead, including the current chunk. At 1 s chunks, `5` ≈ 5 s of buffered audio. |
+| `cp-nice-player.playback.fetchConcurrency` | `1` | Maximum parallel chunk downloads (`1`–`10`). `1` fetches sequentially from low to high index. |
 
 ## Known limitations
 
@@ -59,6 +60,10 @@ Cached chunks live under the extension's global storage and are cleared when the
 - **Session cache** — Chunk cache is wiped when the playback server stops or VS Code reloads the extension.
 
 ## Release notes
+
+### 0.1.0
+
+Streaming engine overhaul: independent fetch and decode loops, suspend/resume pause without discarding scheduled audio, configurable fetch concurrency, and more reliable seek/buffer behavior.
 
 ### 0.0.1
 

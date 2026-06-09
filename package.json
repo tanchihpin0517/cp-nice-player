@@ -1,7 +1,7 @@
 {
   "name": "cp-nice-player",
   "displayName": "CP's Nice Player",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "tanchihpin0517",
   "preview": true,
   "description": "Stream audio files inside VS Code with chunked, low-latency playback powered by FFmpeg and Web Audio.",
@@ -85,6 +85,13 @@
           "minimum": 1,
           "maximum": 20,
           "description": "Number of chunks to buffer from the playhead, including the current chunk."
+        },
+        "cp-nice-player.playback.fetchConcurrency": {
+          "type": "number",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum number of chunk downloads in parallel. 1 fetches sequentially from low to high index."
         }
       }
     }

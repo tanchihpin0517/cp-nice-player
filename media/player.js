@@ -66,10 +66,6 @@ function updateDebugPanel() {
   }
 
   const diag = engine.getDiagnostics();
-  const decoded = diag.decodedChunkIndices;
-  const bufferRange = decoded.length
-    ? decoded[0] + '–' + decoded[decoded.length - 1]
-    : '—';
 
   const fields = [
     renderDebugField('Mode', 'Streaming playback'),
@@ -79,15 +75,19 @@ function updateDebugPanel() {
     renderDebugField('audioId', debugContext.audioId),
     renderDebugField('playbackFormat', debugContext.debug.playbackFormat),
     renderDebugField('chunkBufferCount', String(debugContext.debug.chunkBufferCount)),
+    renderDebugField('fetchConcurrency', String(debugContext.debug.fetchConcurrency)),
     renderDebugField('ffmpeg', debugContext.debug.ffmpeg?.available ? 'available' : 'missing'),
     renderDebugField('decoder', diag.decoderType),
     renderDebugField('context', diag.contextState),
     renderDebugField('index.strategy', diag.manifestStrategy ?? '—'),
     renderDebugField('index.chunkCount', diag.manifestChunkCount != null ? String(diag.manifestChunkCount) : '—'),
     renderDebugField('currentChunk', String(diag.currentChunkIndex)),
-    renderDebugField('decoded chunks', bufferRange),
-    renderDebugField('scheduled chunks', diag.scheduledChunkIndices.join(', ') || '—'),
-    renderDebugField('buffering', diag.buffering ? 'yes' : 'no'),
+    renderDebugField('fetch loop', diag.fetchLoopActive ? 'active' : 'stopped'),
+    renderDebugField('decode loop', diag.decodeLoopActive ? 'active' : 'stopped'),
+    renderDebugField('buffered chunks', diag.bufferedChunks),
+    renderDebugField('active sources', diag.activeSources),
+    renderDebugField('decoded chunks', diag.decodedChunks),
+    renderDebugField('fetch in-flight', diag.fetchInFlight),
     renderDebugField('playheadSec', diag.currentTime.toFixed(2)),
     renderDebugField('durationSec', diag.duration.toFixed(2)),
   ];
@@ -122,6 +122,7 @@ async function loadMediaMessage(message) {
     await engine.load(message.serverUrl, message.audioId, {
       name: message.name,
       chunkBufferCount: message.debug.chunkBufferCount,
+      fetchConcurrency: message.debug.fetchConcurrency,
     });
     trackState.textContent = 'Ready';
     setControlsEnabled(true);
@@ -216,6 +217,11 @@ function bindEngineEvents() {
     updateDebugPanel();
   });
 
+  engine.addEventListener('debug', (event) => {
+    logEvent('debug', event.detail.message);
+    updateDebugPanel();
+  });
+
   engine.addEventListener('ended', () => {
     setPlayButtonLabel(false);
     trackState.textContent = 'Ended';
@@ -245,6 +251,9 @@ function bindEngineEvents() {
 
   engine.addEventListener('error', (event) => {
     logEvent('error', event.detail.message);
+    if (engine.getDiagnostics().manifestChunkCount == null) {
+      trackState.textContent = 'Index error (retrying): ' + event.detail.message;
+    }
     updateDebugPanel();
   });
 }

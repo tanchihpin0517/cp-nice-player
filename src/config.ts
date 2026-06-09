@@ -29,3 +29,10 @@ export function getChunkBufferCount(): number {
 		.get<number>('playback.chunkBufferCount', 5);
 	return Math.min(20, Math.max(1, Math.round(value)));
 }
+
+export function getFetchConcurrency(): number {
+	const value = vscode.workspace
+		.getConfiguration('cp-nice-player')
+		.get<number>('playback.fetchConcurrency', 1);
+	return Math.min(10, Math.max(1, Math.round(value)));
+}

@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import {
 	getChunkBufferCount,
 	getChunkDurationSec,
+	getFetchConcurrency,
 	getPlaybackFormat,
 	getPlaybackOggQuality,
 	PlaybackFormat,
@@ -26,6 +27,7 @@ interface LoadMediaMessage {
 		playbackOggQuality: number;
 		chunkDurationSec: number;
 		chunkBufferCount: number;
+		fetchConcurrency: number;
 		ffmpeg: {
 			available: boolean;
 			path: string;
@@ -157,6 +159,7 @@ export class MediaPlayerSession implements vscode.Disposable {
 				playbackOggQuality: getPlaybackOggQuality(),
 				chunkDurationSec: getChunkDurationSec(),
 				chunkBufferCount: getChunkBufferCount(),
+				fetchConcurrency: getFetchConcurrency(),
 				ffmpeg: {
 					available: ffmpeg.available,
 					path: ffmpeg.path,
