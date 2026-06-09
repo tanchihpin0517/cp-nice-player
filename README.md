@@ -61,6 +61,10 @@ Cached chunks live under the extension's global storage and are cleared when the
 
 ## Release notes
 
+### 0.1.1
+
+Lowers the minimum VS Code version to `1.105.1` for wider compatibility.
+
 ### 0.1.0
 
 Streaming engine overhaul: independent fetch and decode loops, suspend/resume pause without discarding scheduled audio, configurable fetch concurrency, and more reliable seek/buffer behavior.
