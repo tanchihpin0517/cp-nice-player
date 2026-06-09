@@ -267,8 +267,10 @@ class StreamingAudioEngine extends EventTarget {
     return { currentChunk, targetEnd };
   }
 
-  _streamQuery() {
-    return 'audioId=' + encodeURIComponent(this.audioId);
+  _streamUrl(pathname) {
+    const url = new URL(pathname, this.serverUrl);
+    url.searchParams.set('audioId', this.audioId);
+    return url;
   }
 
   async _fetchIndexLoop(generation) {
@@ -313,7 +315,9 @@ class StreamingAudioEngine extends EventTarget {
   async _fetchIndex(generation) {
     this._abortIndexFetch();
     this.indexFetchAbort = new AbortController();
-    const response = await fetch(this.serverUrl + '/index?' + this._streamQuery(), {
+    const url = this._streamUrl('/index');
+    this._emit('debug', { message: 'fetching index from ' + url });
+    const response = await fetch(url, {
       signal: this.indexFetchAbort.signal,
     });
     if (generation !== this.loadGeneration) {
@@ -471,10 +475,9 @@ class StreamingAudioEngine extends EventTarget {
       this.fetchAbortControllers.set(index, controller);
 
       try {
-        const response = await fetch(
-          this.serverUrl + '/chunk/' + index + '?' + this._streamQuery(),
-          { signal: controller.signal },
-        );
+        const response = await fetch(this._streamUrl('/chunk/' + index), {
+          signal: controller.signal,
+        });
         if (generation !== this.loadGeneration) {
           throw new DOMException('Aborted', 'AbortError');
         }

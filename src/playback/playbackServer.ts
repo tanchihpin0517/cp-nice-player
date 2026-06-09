@@ -11,6 +11,7 @@ export class PlaybackServer implements vscode.Disposable {
 	private server: http.Server | undefined;
 	private listenPromise: Promise<number> | undefined;
 	private port: number | undefined;
+	private externalUrl: string | undefined;
 	private disposed = false;
 	private readonly registry = new AudioRegistry();
 
@@ -66,10 +67,7 @@ export class PlaybackServer implements vscode.Disposable {
 	}
 
 	getServerUrl(): string | undefined {
-		if (this.port === undefined) {
-			return undefined;
-		}
-		return `http://127.0.0.1:${this.port}`;
+		return this.externalUrl;
 	}
 
 	dispose(): void {
@@ -79,6 +77,7 @@ export class PlaybackServer implements vscode.Disposable {
 		this.server = undefined;
 		this.listenPromise = undefined;
 		this.port = undefined;
+		this.externalUrl = undefined;
 		cleanStreamCacheDir(this.context);
 	}
 
@@ -89,7 +88,7 @@ export class PlaybackServer implements vscode.Disposable {
 			});
 
 			this.server.on('error', reject);
-			this.server.listen(0, '127.0.0.1', () => {
+			this.server.listen(0, '127.0.0.1', async () => {
 				if (this.disposed) {
 					reject(new Error('Playback server was disposed during startup.'));
 					return;
@@ -102,11 +101,15 @@ export class PlaybackServer implements vscode.Disposable {
 				}
 
 				this.port = address.port;
+				const externalUri = await vscode.env.asExternalUri(
+					vscode.Uri.parse(`http://127.0.0.1:${this.port}`),
+				);
+				this.externalUrl = externalUri.toString(true);
 				console.log(
-					`cp-nice-player: Playback server started on 127.0.0.1:${this.port}.`,
+					`cp-nice-player: Playback server started on ${this.externalUrl}.`,
 				);
 				void vscode.window.showInformationMessage(
-					`CP's Nice Player: Playback server started on 127.0.0.1:${this.port}.`,
+					`CP's Nice Player: Playback server started on ${this.externalUrl}.`,
 				);
 				resolve(this.port);
 			});
