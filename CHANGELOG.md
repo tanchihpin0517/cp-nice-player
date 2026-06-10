@@ -5,6 +5,14 @@ All notable changes to **CP's Nice Player** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-06-10
+
+### Security
+
+- **Arbitrary Command Execution:** Restricted `cp-nice-player.ffmpegPath` configuration scope to `machine` to prevent `.vscode/settings.json` hijacking.
+- **Cross-Site Scripting (XSS):** Escaped file names and paths in the webview debug panel to prevent DOM-based XSS when opening maliciously named files.
+- **Localhost CORS:** Removed wildcard CORS from the playback server and implemented strict origin validation for trusted VS Code webviews to prevent data leaks to malicious external websites.
+
 ## [0.1.2] - 2026-06-10
 
 ### Fixed
@@ -58,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio only — video tracks in container files are not played.
 - Chunk cache is session-scoped and cleared when the playback server stops or restarts.
 
+[0.1.3]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.3
 [0.1.2]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.2
 [0.1.1]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.1
 [0.1.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.0
