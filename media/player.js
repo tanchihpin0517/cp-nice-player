@@ -27,6 +27,15 @@ function formatTime(seconds) {
   return mins + ':' + String(secs).padStart(2, '0');
 }
 
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function logEvent(name, detail) {
   const timestamp = new Date().toLocaleTimeString();
   eventLog.unshift({ timestamp, name, detail });
@@ -38,13 +47,13 @@ function logEvent(name, detail) {
 
 function renderEventLog() {
   debugLog.innerHTML = eventLog.map((entry) => {
-    const detail = entry.detail ? ' <span class="event-detail">' + entry.detail + '</span>' : '';
-    return '<li>[' + entry.timestamp + '] <span class="event-name">' + entry.name + '</span>' + detail + '</li>';
+    const detail = entry.detail ? ' <span class="event-detail">' + escapeHtml(entry.detail) + '</span>' : '';
+    return '<li>[' + escapeHtml(entry.timestamp) + '] <span class="event-name">' + escapeHtml(entry.name) + '</span>' + detail + '</li>';
   }).join('');
 }
 
 function renderDebugField(label, value) {
-  return '<dt>' + label + '</dt><dd>' + (value ?? '—') + '</dd>';
+  return '<dt>' + escapeHtml(label) + '</dt><dd>' + escapeHtml(value ?? '—') + '</dd>';
 }
 
 function setPlayButtonLabel(playing) {

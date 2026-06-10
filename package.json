@@ -49,6 +49,7 @@
       "properties": {
         "cp-nice-player.ffmpegPath": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "description": "Optional path to the ffmpeg executable. Leave empty to use ffmpeg from PATH. FFmpeg is required for playback."
         },

@@ -116,6 +116,21 @@ export class PlaybackServer implements vscode.Disposable {
 		});
 	}
 
+	private getAllowedOrigin(origin: string | undefined): string | undefined {
+		if (!origin) {
+			return undefined;
+		}
+		// Desktop editors: Match vscode-webview://, cursor-webview://, vscodium-webview://, etc.
+		if (/^[a-z0-9-]+-webview:\/\//i.test(origin)) {
+			return origin;
+		}
+		// Browser editors (VS Code for the Web, github.dev): Match https://*.vscode-cdn.net
+		if (origin.startsWith('https://') && origin.endsWith('.vscode-cdn.net')) {
+			return origin;
+		}
+		return undefined;
+	}
+
 	private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
 		if (this.disposed) {
 			res.writeHead(503, { 'Content-Type': 'application/json' });
@@ -123,7 +138,11 @@ export class PlaybackServer implements vscode.Disposable {
 			return;
 		}
 
-		res.setHeader('Access-Control-Allow-Origin', '*');
+		const origin = req.headers.origin;
+		const allowedOrigin = this.getAllowedOrigin(origin);
+		if (allowedOrigin) {
+			res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+		}
 		res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
 		if (req.method === 'OPTIONS') {
