@@ -10,8 +10,18 @@ Instead of transcoding an entire file before play starts, CP's Nice Player scans
 - **Responsive seeking** — Scrub to any position; only the chunks you need are fetched and decoded.
 - **Bounded memory** — The webview keeps a configurable window of decoded PCM, not the whole track.
 - **Broad format support** — MP3, WAV, OGG, Opus, FLAC, M4A, AAC, WebM, MP4, and MKV containers open in the custom editor (audio tracks only).
+- **Remote development** — Playback works over Remote SSH, Dev Containers, WSL, and Codespaces via VS Code port forwarding.
 - **Disk cache** — Transcoded chunks are reused while the playback server is running.
 - **Configurable output** — Stream as Ogg Vorbis (default) or FLAC, with tunable chunk size and buffer depth.
+
+## Installation
+
+Install from your editor's marketplace:
+
+- [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=tanchihpin0517.cp-nice-player)
+- [Open VSX](https://open-vsx.org/extension/tanchihpin0517/cp-nice-player) (VSCodium and other Open VSX-based editors)
+
+Or download the `.vsix` from [GitHub Releases](https://github.com/tanchihpin0517/cp-nice-player/releases) and install it with **Extensions: Install from VSIX…**.
 
 ## Getting started
 
@@ -26,7 +36,8 @@ To use a different editor for a file type, use **Reopen Editor With…** or set 
 
 ### Requirements
 
-**FFmpeg** must be installed and available on your `PATH`, or set `cp-nice-player.ffmpegPath` to the executable. FFmpeg is used to probe the source and transcode playback chunks on the host.
+- **VS Code 1.90.0 or newer** (or a compatible editor such as VSCodium on Open VSX).
+- **FFmpeg** must be installed and available on your `PATH`, or set `cp-nice-player.ffmpegPath` in **user** settings to the executable on the machine where playback runs. FFmpeg is used to probe the source and transcode playback chunks on the host.
 
 If FFmpeg is missing, the extension shows a one-time notification with setup guidance.
 
@@ -47,7 +58,7 @@ Cached chunks live under the extension's global storage and are cleared when the
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `cp-nice-player.ffmpegPath` | *(empty)* | Path to the `ffmpeg` executable. Leave empty to use `ffmpeg` from `PATH`. |
+| `cp-nice-player.ffmpegPath` | *(empty)* | Path to the `ffmpeg` executable on the playback machine. Machine-scoped (user settings only). Leave empty to use `ffmpeg` from `PATH`. |
 | `cp-nice-player.playback.format` | `ogg` | Output format for streamed chunks: `ogg` (smaller, faster) or `flac` (lossless). |
 | `cp-nice-player.playback.oggQuality` | `6` | libvorbis quality (`0`–`10`) when format is `ogg`. Higher is better quality and larger chunks. |
 | `cp-nice-player.playback.chunkDurationSec` | `1` | Target duration of each streamed chunk in seconds (`0.5`–`10`). |
@@ -62,13 +73,17 @@ Cached chunks live under the extension's global storage and are cleared when the
 
 ## Release notes
 
+### 0.1.4
+
+Lowers the minimum VS Code version to `1.90.0` and adds automated publishing to Open VSX, the Visual Studio Marketplace, and GitHub Releases.
+
+### 0.1.3
+
+Security hardening: `ffmpegPath` restricted to machine scope, XSS fixes in the debug panel, and strict CORS on the playback server.
+
 ### 0.1.2
 
 Fixes playback in remote and containerized setups by resolving the server URL through `vscode.env.asExternalUri`, which triggers VS Code port forwarding. Stream request URLs are built with the `URL` API for safe path joining.
-
-### 0.1.1
-
-Lowers the minimum VS Code version to `1.105.1` for wider compatibility.
 
 ### 0.1.0
 

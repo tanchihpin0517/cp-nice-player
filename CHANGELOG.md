@@ -5,6 +5,13 @@ All notable changes to **CP's Nice Player** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-06-17
+
+### Changed
+
+- Lower minimum VS Code engine to `^1.90.0` for broader compatibility with VS Code, VSCodium, and other Open VSX-based editors.
+- GitHub Actions workflow publishes to **Open VSX**, the **Visual Studio Marketplace**, and **GitHub Releases** when a version tag (`v*`) is pushed.
+
 ## [0.1.3] - 2026-06-10
 
 ### Security
@@ -66,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio only — video tracks in container files are not played.
 - Chunk cache is session-scoped and cleared when the playback server stops or restarts.
 
+[0.1.4]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.4
 [0.1.3]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.3
 [0.1.2]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.2
 [0.1.1]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.1
