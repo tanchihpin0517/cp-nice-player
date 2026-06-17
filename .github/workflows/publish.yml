@@ -1,6 +1,9 @@
 name: PublishRelease
 
-# Trigger the workflow when a version tag is pushed (e.g., v0.1.3)
+# Trigger the workflow when a version tag is pushed (e.g., v0.1.4).
+# Required repo secrets:
+#   OPEN_VSX_TOKEN         — https://open-vsx.org user settings → Access Tokens
+#   VS_MARKETPLACE_TOKEN   — Azure DevOps PAT with Marketplace → Manage scope
 on:
   push:
     tags:
@@ -13,24 +16,33 @@ jobs:
       contents: write
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
-      - name: Use Node.js 18.x
-        uses: actions/setup-node@v2
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
         with:
-          node-version: 18.x
+          node-version: 20
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      # Package the extension into a .vsix file
-      # This will automatically run the 'vscode:prepublish' script defined in package.json
-      - name: Build and Package Extension
-        run: npx vsce package
+      # Runs vscode:prepublish, packages .vsix, and uploads to Open VSX.
+      - name: Publish to Open VSX
+        uses: HaaLeo/publish-vscode-extension@v2
+        id: publishOpenVSX
+        with:
+          pat: ${{ secrets.OPEN_VSX_TOKEN }}
 
-      # Create a new GitHub Release and upload the .vsix file as an asset
+      # Reuses the same .vsix artifact from the Open VSX step.
+      - name: Publish to Visual Studio Marketplace
+        uses: HaaLeo/publish-vscode-extension@v2
+        with:
+          pat: ${{ secrets.VS_MARKETPLACE_TOKEN }}
+          registryUrl: https://marketplace.visualstudio.com
+          extensionFile: ${{ steps.publishOpenVSX.outputs.vsixPath }}
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: '*.vsix'
           generate_release_notes: true
