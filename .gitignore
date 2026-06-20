@@ -4,3 +4,4 @@ node_modules
 .vscode-test/
 *.vsix
 /ai_docs/
+/test_audio_files/
