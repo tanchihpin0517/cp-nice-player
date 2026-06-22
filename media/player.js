@@ -90,11 +90,18 @@ function updateDebugPanel() {
     renderDebugField('context', diag.contextState),
     renderDebugField('index.strategy', diag.manifestStrategy ?? '—'),
     renderDebugField('index.chunkCount', diag.manifestChunkCount != null ? String(diag.manifestChunkCount) : '—'),
+    renderDebugField('channels', diag.manifestChannels != null ? String(diag.manifestChannels) : '—'),
+    renderDebugField('sampleRate', diag.manifestSampleRate != null ? String(diag.manifestSampleRate) : '—'),
+    renderDebugField('context sampleRate', diag.contextSampleRate != null ? String(diag.contextSampleRate) : '—'),
     renderDebugField('currentChunk', String(diag.currentChunkIndex)),
     renderDebugField('fetch loop', diag.fetchLoopActive ? 'active' : 'stopped'),
     renderDebugField('decode loop', diag.decodeLoopActive ? 'active' : 'stopped'),
     renderDebugField('buffered chunks', diag.bufferedChunks),
-    renderDebugField('active sources', diag.activeSources),
+    renderDebugField('scheduler', diag.scheduler ?? '—'),
+    renderDebugField('ring buffered', diag.ringFramesAvailable != null
+      ? `${diag.ringFramesAvailable} frames (${diag.ringFreeFrames} free)`
+      : '—'),
+    renderDebugField('underrun frames', diag.underrunFrames != null ? String(diag.underrunFrames) : '—'),
     renderDebugField('decoded chunks', diag.decodedChunks),
     renderDebugField('fetch in-flight', diag.fetchInFlight),
     renderDebugField('playheadSec', diag.currentTime.toFixed(2)),
@@ -131,6 +138,7 @@ async function loadMediaMessage(message) {
     await engine.load(message.serverUrl, message.audioId, {
       name: message.name,
       chunkBufferCount: message.debug.chunkBufferCount,
+      chunkDurationSec: message.debug.chunkDurationSec,
       fetchConcurrency: message.debug.fetchConcurrency,
     });
     trackState.textContent = 'Ready';

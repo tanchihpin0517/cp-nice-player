@@ -176,6 +176,15 @@ export class MediaPlayerSession implements vscode.Disposable {
 		const templatePath = vscode.Uri.joinPath(this.extensionUri, 'media', 'player.html');
 		const template = fs.readFileSync(templatePath.fsPath, 'utf8');
 		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'player.css'));
+		const pcmRingUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'media', 'pcmRing.js'),
+		);
+		const workletSchedulerUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'media', 'workletScheduler.js'),
+		);
+		const workletProcessorUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'media', 'pcmWorkletProcessor.js'),
+		);
 		const engineScriptUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.extensionUri, 'media', 'streamingAudioEngine.js'),
 		);
@@ -184,6 +193,9 @@ export class MediaPlayerSession implements vscode.Disposable {
 		return template
 			.replaceAll('{{cspSource}}', webview.cspSource)
 			.replaceAll('{{styleUri}}', styleUri.toString())
+			.replaceAll('{{pcmRingUri}}', pcmRingUri.toString())
+			.replaceAll('{{workletSchedulerUri}}', workletSchedulerUri.toString())
+			.replaceAll('{{workletProcessorUri}}', workletProcessorUri.toString())
 			.replaceAll('{{engineScriptUri}}', engineScriptUri.toString())
 			.replaceAll('{{scriptUri}}', scriptUri.toString());
 	}

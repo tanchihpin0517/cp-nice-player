@@ -41,17 +41,20 @@ function formatChunkRanges(indices) {
 const LOOP_INTERVAL_MS = 200;
 const DECODE_IDLE_MS = 200;
 const INDEX_RETRY_INTERVAL_MS = 1000;
+const RING_HEADROOM_SEC = 5;
+const WORKLET_MODULE_URL = document.querySelector('meta[name="cp-worklet-module-url"]')?.getAttribute('content') ?? '';
 
 class StreamingAudioEngine extends EventTarget {
   constructor() {
     super();
     this.ctx = null;
-    this.gainNode = null;
+    this.scheduler = null;
     this.serverUrl = '';
     this.audioId = '';
     this.mediaName = '';
     this.manifest = null;
     this.chunkBufferCount = 5;
+    this.chunkDurationSec = 1;
     this.fetchConcurrency = 1;
     this.loadGeneration = 0;
     this.indexFetchAbort = null;
@@ -59,8 +62,6 @@ class StreamingAudioEngine extends EventTarget {
     this.encodedChunks = new Map();
     this.fetchInFlight = new Map();
     this.decodedChunks = new Set();
-    this.activeSources = [];
-    this.nextPlayTime = 0;
     this.pausedAt = 0;
     this.playbackAnchorCtxTime = 0;
     this.isPlaying = false;
@@ -72,6 +73,7 @@ class StreamingAudioEngine extends EventTarget {
     this._timeTicker = null;
     this._indexRetryTimer = null;
     this._bufferedChunks = '—';
+    this._lastWorkletStats = null;
   }
 
   async load(serverUrl, audioId, options = {}) {
@@ -82,6 +84,7 @@ class StreamingAudioEngine extends EventTarget {
     this.audioId = audioId;
     this.mediaName = options.name || '';
     this.chunkBufferCount = Math.max(1, Number(options.chunkBufferCount) || 5);
+    this.chunkDurationSec = Math.max(0.5, Number(options.chunkDurationSec) || 1);
     this.fetchConcurrency = Math.max(1, Number(options.fetchConcurrency) || 1);
     this.pausedAt = 0;
     this.decoderType = 'none';
@@ -94,7 +97,12 @@ class StreamingAudioEngine extends EventTarget {
     }
 
     this.manifest = manifest;
-    this._openAudioContext();
+    const { sampleRate } = this._manifestAudioLayout();
+    this._openAudioContext(sampleRate);
+    await this._initSchedulerFromManifest(generation);
+    if (generation !== this.loadGeneration) {
+      return;
+    }
     this._emitStreamStatus('index', 'ready', { count: manifest.chunking.count });
     this._emit('ready', {
       duration: manifest.durationSec,
@@ -115,17 +123,21 @@ class StreamingAudioEngine extends EventTarget {
       return;
     }
 
-    const resuming = this.activeSources.length > 0;
+    const resuming = this.decodedChunks.size > 0
+      || (this.scheduler?.framesAvailable ?? 0) > 0;
 
-    if (this.ctx.state !== 'running') {
+    if (!resuming) {
+      this.scheduler?.reset();
+      this.playbackAnchorCtxTime = this.ctx.currentTime;
+    }
+
+    if (this.scheduler) {
+      await this.scheduler.play();
+    } else if (this.ctx.state !== 'running') {
       await this.ctx.resume();
     }
 
     this.isPlaying = true;
-    if (!resuming) {
-      this.playbackAnchorCtxTime = this.ctx.currentTime;
-      this.nextPlayTime = this.ctx.currentTime;
-    }
     this._startTimeTicker();
     this._emit('playing');
   }
@@ -137,7 +149,11 @@ class StreamingAudioEngine extends EventTarget {
     this.pausedAt = this.getCurrentTime();
     this.isPlaying = false;
     this._stopTimeTicker();
-    await this._suspendAudioContext();
+    if (this.scheduler) {
+      await this.scheduler.pause();
+    } else {
+      await this._suspendAudioContext();
+    }
     this._emit('pause');
     this._emit('timeupdate', {
       currentTime: this.pausedAt,
@@ -156,10 +172,11 @@ class StreamingAudioEngine extends EventTarget {
 
     this.loadGeneration += 1;
     this._abortAllFetches();
-    this._stopAllSources();
+    this.scheduler?.reset();
     this.decodedChunks.clear();
     this.pausedAt = clamped;
     this.isPlaying = false;
+    this._stopTimeTicker();
 
     this._emit('timeupdate', {
       currentTime: this.pausedAt,
@@ -188,9 +205,6 @@ class StreamingAudioEngine extends EventTarget {
     if (!this.isPlaying) {
       return this.pausedAt;
     }
-    if (this.activeSources.length === 0) {
-      return this.pausedAt;
-    }
     const elapsed = this.ctx.currentTime - this.playbackAnchorCtxTime;
     return Math.min(Math.max(this.pausedAt + elapsed, 0), this.manifest.durationSec);
   }
@@ -204,8 +218,12 @@ class StreamingAudioEngine extends EventTarget {
     const currentChunk = this.manifest ? chunkIndexForTime(this.manifest, this.getCurrentTime()) : 0;
     return {
       mode: 'streaming',
+      scheduler: this.scheduler ? 'worklet' : '—',
       contextState: this.manifest ? this.ctx.state : 'uninitialized',
-      sampleRate: this.manifest ? this.ctx.sampleRate : 0,
+      contextSampleRate: this.ctx?.sampleRate ?? 0,
+      sampleRate: this.manifest?.sampleRate ?? 0,
+      manifestChannels: this.manifest?.channels ?? 0,
+      manifestSampleRate: this.manifest?.sampleRate ?? 0,
       currentTime: this.getCurrentTime(),
       duration: this.getDuration(),
       paused: !this.isPlaying,
@@ -221,13 +239,10 @@ class StreamingAudioEngine extends EventTarget {
       fetchInFlight: formatChunkRanges(fetchInFlight),
       fetchLoopActive: this._fetchTimer != null,
       decodeLoopActive: this.manifest != null,
-      activeSources: formatChunkRanges(
-        this.activeSources
-          .map((source) => source._chunkIndex)
-          .filter((index) => index != null),
-      ),
       decodedChunks: formatChunkRanges([...this.decodedChunks].sort((a, b) => a - b)),
-      nextPlayTime: this.nextPlayTime,
+      ringFramesAvailable: this.scheduler?.framesAvailable ?? 0,
+      ringFreeFrames: this.scheduler?.freeFrames ?? 0,
+      underrunFrames: this.scheduler?.underrunFrames ?? 0,
       manifestStrategy: this.manifest?.chunking?.strategy,
       manifestChunkCount: this.manifest?.chunking?.count,
       bufferedChunks: this._bufferedChunks,
@@ -243,7 +258,8 @@ class StreamingAudioEngine extends EventTarget {
     this._abortIndexFetch();
     this._clearIndexRetryTimer();
     this.isPlaying = false;
-    this._stopAllSources();
+    this.scheduler?.dispose();
+    this.scheduler = null;
     this.manifest = null;
     this.encodedChunks.clear();
     this._bufferedChunks = '—';
@@ -254,8 +270,68 @@ class StreamingAudioEngine extends EventTarget {
     if (this.ctx) {
       await this.ctx.close();
       this.ctx = null;
-      this.gainNode = null;
     }
+  }
+
+  _ringCapacitySec() {
+    return this.chunkBufferCount * this.chunkDurationSec + RING_HEADROOM_SEC;
+  }
+
+  _manifestAudioLayout() {
+    const channels = this.manifest?.channels;
+    const sampleRate = this.manifest?.sampleRate;
+    if (
+      !Number.isInteger(channels) || channels <= 0
+      || !Number.isInteger(sampleRate) || sampleRate <= 0
+    ) {
+      throw new Error('Index manifest is missing valid channels or sampleRate');
+    }
+    return { channelCount: channels, sampleRate };
+  }
+
+  _createWorkletScheduler() {
+    return new WorkletScheduler({
+      workletModuleUrl: WORKLET_MODULE_URL,
+      ringCapacitySec: this._ringCapacitySec(),
+      onStats: (stats) => {
+        this._lastWorkletStats = stats;
+      },
+    });
+  }
+
+  async _initSchedulerFromManifest(generation) {
+    if (generation !== this.loadGeneration) {
+      return false;
+    }
+
+    const { channelCount, sampleRate } = this._manifestAudioLayout();
+
+    if (!WORKLET_MODULE_URL) {
+      throw new Error('Worklet module URL was not injected — reload the player panel.');
+    }
+
+    if (!this.scheduler) {
+      this.scheduler = this._createWorkletScheduler();
+      await this.scheduler.init(this.ctx, channelCount, sampleRate, {
+        ringCapacitySec: this._ringCapacitySec(),
+      });
+      this._syncGain();
+      return generation === this.loadGeneration;
+    }
+
+    if (
+      this.scheduler.channelCount !== channelCount
+      || this.scheduler.sampleRate !== sampleRate
+    ) {
+      this.scheduler.dispose();
+      this.scheduler = this._createWorkletScheduler();
+      await this.scheduler.init(this.ctx, channelCount, sampleRate, {
+        ringCapacitySec: this._ringCapacitySec(),
+      });
+      this._syncGain();
+    }
+
+    return generation === this.loadGeneration;
   }
 
   _getBufferWindow() {
@@ -265,6 +341,47 @@ class StreamingAudioEngine extends EventTarget {
       this.manifest.chunking.count - 1,
     );
     return { currentChunk, targetEnd };
+  }
+
+  _hasPendingChunksToWrite() {
+    if (!this.manifest) {
+      return false;
+    }
+    const { targetEnd } = this._getBufferWindow();
+    const first = this._nextChunkToSchedule();
+    if (first == null || first > targetEnd) {
+      return false;
+    }
+    for (let index = first; index <= targetEnd; index += 1) {
+      if (!this.decodedChunks.has(index)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  _checkPlaybackEnded() {
+    if (!this.isPlaying || !this.manifest) {
+      return;
+    }
+    const duration = this.manifest.durationSec;
+    if (this.getCurrentTime() < duration - 0.05) {
+      return;
+    }
+    if (this._hasPendingChunksToWrite()) {
+      return;
+    }
+    this.isPlaying = false;
+    this.pausedAt = 0;
+    this._stopTimeTicker();
+    this.scheduler?.reset();
+    this.decodedChunks.clear();
+    void this.scheduler?.pause();
+    this._emit('ended');
+    this._emit('timeupdate', {
+      currentTime: 0,
+      duration: this.getDuration(),
+    });
   }
 
   _streamUrl(pathname) {
@@ -414,7 +531,7 @@ class StreamingAudioEngine extends EventTarget {
         continue;
       }
 
-      await this._decodeAndScheduleChunk(index, generation);
+      await this._decodeAndWriteChunk(index, generation);
     }
   }
 
@@ -510,7 +627,7 @@ class StreamingAudioEngine extends EventTarget {
     return task;
   }
 
-  async _decodeAndScheduleChunk(index, generation) {
+  async _decodeAndWriteChunk(index, generation) {
     if (this.decodedChunks.has(index)) {
       return null;
     }
@@ -528,81 +645,51 @@ class StreamingAudioEngine extends EventTarget {
         return null;
       }
 
-      if (this.nextPlayTime < this.ctx.currentTime) {
-        this.nextPlayTime = this.ctx.currentTime;
+      if (
+        audioBuffer.numberOfChannels !== this.manifest.channels
+        || audioBuffer.sampleRate !== this.manifest.sampleRate
+      ) {
+        throw new Error(
+          'Decoded layout differs from manifest ('
+            + audioBuffer.numberOfChannels + 'ch @ ' + audioBuffer.sampleRate + ' Hz vs manifest '
+            + this.manifest.channels + 'ch @ ' + this.manifest.sampleRate + ' Hz)',
+        );
       }
 
-      const offsetSec = this.activeSources.length === 0
+      if (!this.scheduler) {
+        throw new Error('Worklet scheduler is not initialized');
+      }
+
+      const entry = chunkEntry(this.manifest, index);
+      const offsetSec = this.decodedChunks.size === 0
         ? Math.min(
-          Math.max(0, this.pausedAt - chunkEntry(this.manifest, index).startSec),
+          Math.max(0, this.pausedAt - (entry?.startSec ?? 0)),
           audioBuffer.duration,
         )
         : 0;
-      const playDuration = Math.max(0, audioBuffer.duration - offsetSec);
-      if (playDuration <= 0) {
+      const offsetFrames = Math.floor(offsetSec * this.manifest.sampleRate);
+      const frameCount = audioBuffer.length - offsetFrames;
+      if (frameCount <= 0) {
         return null;
       }
 
-      const source = this.ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      source._chunkIndex = index;
-      source.connect(this.gainNode);
-      source.start(this.nextPlayTime, offsetSec);
-      this.activeSources.push(source);
-      this.nextPlayTime += playDuration;
+      await this.scheduler.writePcm(audioBuffer, offsetFrames, frameCount);
+      if (generation !== this.loadGeneration) {
+        return null;
+      }
+
       this.decodedChunks.add(index);
-
       this._emitStreamStatus('decode', 'ready', { chunkIndex: index });
-
-      source.onended = () => {
-        this._removeSource(source);
-        if (!this.isPlaying) {
-          return;
-        }
-        const atEnd = index >= this.manifest.chunking.count - 1
-          || this.getCurrentTime() >= this.manifest.durationSec - 0.05;
-        if (atEnd) {
-          this.isPlaying = false;
-          this.pausedAt = 0;
-          this._stopTimeTicker();
-          this._stopAllSources();
-          this.decodedChunks.clear();
-          this._emit('ended');
-          this._emit('timeupdate', {
-            currentTime: 0,
-            duration: this.getDuration(),
-          });
-        }
-      };
+      this._checkPlaybackEnded();
 
       return index;
-    } 
+    }
     catch (error) {
       this._emit('error', { message: String(error) });
       return null;
     }
   }
 
-  _removeSource(source) {
-    const idx = this.activeSources.indexOf(source);
-    if (idx >= 0) {
-      this.activeSources.splice(idx, 1);
-    }
-  }
-
-  _stopAllSources() {
-    for (const source of this.activeSources) {
-      try {
-        source.onended = null;
-        source.stop();
-        source.disconnect();
-      } catch {
-        // ignore already stopped
-      }
-    }
-    this.activeSources = [];
-  }
-  
   async _suspendAudioContext() {
     if (this.ctx.state === 'running') {
       this.playbackAnchorCtxTime = this.ctx.currentTime;
@@ -644,17 +731,18 @@ class StreamingAudioEngine extends EventTarget {
   }
 
   async _canUseWebCodecs(codec) {
-    if (!globalThis.AudioDecoder || !globalThis.EncodedAudioChunk) {
+    if (!globalThis.AudioDecoder || !globalThis.EncodedAudioChunk || !this.manifest) {
       return false;
     }
     if (!codec || codec === 'unknown' || codec === 'wav' || codec === 'ogg') {
       return false;
     }
+    const { channelCount, sampleRate } = this._manifestAudioLayout();
     try {
       const result = await AudioDecoder.isConfigSupported({
         codec,
-        sampleRate: 48000,
-        numberOfChannels: 2,
+        sampleRate,
+        numberOfChannels: channelCount,
       });
       return Boolean(result?.supported);
     } catch {
@@ -663,14 +751,15 @@ class StreamingAudioEngine extends EventTarget {
   }
 
   async _decodeWithWebCodecs(bytes, codec) {
+    const { channelCount, sampleRate } = this._manifestAudioLayout();
     const frames = [];
-    let sampleRate = 0;
+    let decodedSampleRate = 0;
     let numberOfChannels = 0;
     let totalFrames = 0;
 
     const decoder = new AudioDecoder({
       output: (audioData) => {
-        sampleRate = audioData.sampleRate;
+        decodedSampleRate = audioData.sampleRate;
         numberOfChannels = audioData.numberOfChannels;
         const channels = [];
         for (let channelIndex = 0; channelIndex < audioData.numberOfChannels; channelIndex += 1) {
@@ -692,8 +781,8 @@ class StreamingAudioEngine extends EventTarget {
 
     decoder.configure({
       codec,
-      sampleRate: 48000,
-      numberOfChannels: 2,
+      sampleRate,
+      numberOfChannels: channelCount,
     });
 
     decoder.decode(new EncodedAudioChunk({
@@ -704,11 +793,11 @@ class StreamingAudioEngine extends EventTarget {
     await decoder.flush();
     decoder.close();
 
-    if (!frames.length || !sampleRate || !numberOfChannels || !totalFrames) {
+    if (!frames.length || !decodedSampleRate || !numberOfChannels || !totalFrames) {
       throw new Error('WebCodecs decode produced no frames.');
     }
 
-    const buffer = this.ctx.createBuffer(numberOfChannels, totalFrames, sampleRate);
+    const buffer = this.ctx.createBuffer(numberOfChannels, totalFrames, decodedSampleRate);
     let offset = 0;
     for (const frame of frames) {
       for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex += 1) {
@@ -719,18 +808,21 @@ class StreamingAudioEngine extends EventTarget {
     return buffer;
   }
 
-  _openAudioContext() {
-    this.ctx = new AudioContext();
-    this.gainNode = this.ctx.createGain();
-    this.gainNode.connect(this.ctx.destination);
-    this._syncGain();
+  _openAudioContext(sampleRate) {
+    this.ctx = new AudioContext({ sampleRate });
+    if (this.ctx.sampleRate !== sampleRate) {
+      this._emit('decoderwarning', {
+        message: 'AudioContext sample rate is '
+          + this.ctx.sampleRate + ' Hz (requested ' + sampleRate + ' Hz); '
+          + 'decodeAudioData may resample chunks',
+      });
+    }
   }
 
   _syncGain() {
-    if (!this.gainNode) {
-      return;
+    if (this.scheduler) {
+      this.scheduler.setVolume(this.muted ? 0 : this.volume);
     }
-    this.gainNode.gain.value = this.muted ? 0 : this.volume;
   }
 
   _startFetchLoop() {
@@ -759,6 +851,10 @@ class StreamingAudioEngine extends EventTarget {
   _startTimeTicker() {
     this._stopTimeTicker();
     this._timeTicker = setInterval(() => {
+      if (!this.isPlaying) {
+        return;
+      }
+      this._checkPlaybackEnded();
       if (!this.isPlaying) {
         return;
       }

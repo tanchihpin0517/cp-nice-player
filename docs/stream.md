@@ -4,6 +4,8 @@ This document is the **full refactor spec** for CP's Nice Player playback. The o
 
 Inspired by [CMAF](https://en.wikipedia.org/wiki/Common_Media_Application_Format) (index + fetchable segments), adapted for a **local VS Code extension**: FFmpeg on the host, chunked HTTP, Web Audio in the webview.
 
+**Docs:** backend and protocol — this file; webview playback — [frontend.md](frontend.md).
+
 ## Scope
 
 
@@ -423,9 +425,12 @@ src/ffmpeg.ts            # keep runFfmpeg, checkFfmpeg; add transcodeChunk(); de
 src/playerPanel.ts       # registerAudio → loadMedia(serverUrl, audioId); no preparePlayback wait
 
 media/
-  streamingAudioEngine.js   # replaces audioEngine.js entirely
-  player.js                   # wired to StreamingAudioEngine + new messages
-  player.html                 # script tag → streamingAudioEngine.js
+  streamingAudioEngine.js   # production player — Option B WorkletScheduler; see frontend.md
+  pcmRing.js                # Option B — see frontend.md
+  pcmWorkletProcessor.js
+  workletScheduler.js
+  player.js
+  player.html
 ```
 
 **Delete** `src/playback/transcode.ts` after moving sanitizers/hash into `streamCache.ts`.
@@ -645,181 +650,52 @@ From `audioEngine.js` → `streamingAudioEngine.js`:
 
 ## Frontend design
 
-### `StreamingAudioEngine` (replaces `AudioEngine`)
+The webview (`player.js` + `streamingAudioEngine.js`) fetches the index and chunks over HTTP, decodes each chunk to PCM, and drives Web Audio output. It only knows `serverUrl`, `audioId`, and chunk numbers — see [Dataflow](#dataflow).
 
-Stream-only playback — replace monolithic `load()` + single `AudioBuffer` with:
+**Full spec:** [frontend.md](frontend.md) (schedulers, ring buffer, VS Code webview CSP, state machine).
 
-
-| Component        | Responsibility                                                                                                                   |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **IndexClient**  | `fetch(\`${serverUrl}/index?audioId=${id})` → manifest with frame-aligned chunk map                                              |
-| **ChunkLoader**  | Fetches chunks in `[playhead, playhead + chunkBufferCount − 1]`; priority queue; abort on seek                                   |
-| **ChunkDecoder** | Per chunk: `decodeAudioData` or WebCodecs (reuse `_decodeWithWebCodecs` logic); output `{ pcm, sampleRate, channels, startSec }` |
-| **PcmRing**      | Stores decoded float32 per channel for a time window; evicts far-behind playhead                                                 |
-| **Scheduler**    | Drives `AudioContext` output — see [Scheduler options](#scheduler-options) (**v1: Option A**)                                    |
-
-
-### Scheduler options
-
-Two ways to turn decoded PCM into continuous speakers output. **v1 ships Option A**; Option B remains a documented upgrade path.
-
-#### Option A: Chained `AudioBufferSourceNode` + `nextPlayTime` (v1)
-
-Each decoded chunk is a small `AudioBuffer`. The scheduler chains `AudioBufferSourceNode` instances on a single hardware timeline (`nextPlayTime`), similar to a reference WebCodecs + Web Audio pipeline.
-
-```mermaid
-sequenceDiagram
-  participant CL as ChunkLoader
-  participant Dec as ChunkDecoder
-  participant Sched as Scheduler
-  participant Ctx as AudioContext
-
-  CL->>Dec: fetch chunk N
-  Dec->>Sched: AudioBuffer
-  Sched->>Ctx: BufferSource.start(nextPlayTime)
-  Note over Sched: nextPlayTime += audioBuffer.duration
-  CL->>Dec: fetch chunk N+1
-  Sched->>Ctx: BufferSource.start(nextPlayTime)
-```
-
-
-
-**Schedule loop (per chunk):**
-
-```js
-if (nextPlayTime < audioCtx.currentTime) {
-  nextPlayTime = audioCtx.currentTime;  // underrun snap — avoid gap
-}
-source.buffer = audioBuffer;
-source.connect(gainNode);
-source.start(nextPlayTime);
-nextPlayTime += audioBuffer.duration;   // actual decoded length, not fixed 1s
-```
-
-
-| Aspect    | Detail                                                                            |
-| --------- | --------------------------------------------------------------------------------- |
-| **Play**  | Init or resume `nextPlayTime` from `audioCtx.currentTime - pausedAt`              |
-| **Pause** | `stop()` active sources; save `pausedAt`                                          |
-| **Seek**  | Stop sources, clear scheduled set, reload chunk window, reset timeline if playing |
-| **Dedup** | `scheduledChunks: Set<index>` — do not schedule the same chunk twice              |
-
-
-
-| Pros                                                    | Cons                                                                                           |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Simple; no extra worklet file or CSP concerns           | Many short sources over very long tracks                                                       |
-| Easy seek/pause/resume                                  | Scheduling alone does not fix encode-edge discontinuities                                      |
-| `nextPlayTime` reduces timing gaps vs fixed-time chunk math | Minor boundary clicks still possible on Ogg slices (mitigate with FFmpeg + optional crossfade) |
-| Fast to ship and debug in webview                       |                                                                                                |
-
-
-**v1 choice:** implement Option A in `[streamingAudioEngine.js](media/streamingAudioEngine.js)`.
-
----
-
-#### Option B: `AudioWorklet` + ring buffer (deferred)
-
-A custom `AudioWorkletProcessor` pulls samples every render quantum (~128 frames). The main thread **writes** decoded PCM into a ring buffer; the worklet **reads** and fills `outputs` in `process()`.
-
-```mermaid
-flowchart LR
-  subgraph mainThread [Main thread]
-    Dec[ChunkDecoder]
-    Write[Write PCM to ring]
-    Dec --> Write
-  end
-
-  subgraph audioThread [AudioWorklet thread]
-    Ring[Ring buffer read side]
-    Proc["process()"]
-    Ring --> Proc
-    Proc --> Out[Speakers]
-  end
-
-  Write -->|"postMessage or SharedArrayBuffer"| Ring
-```
-
-
-
-
-| Aspect          | Detail                                                                                            |
-| --------------- | ------------------------------------------------------------------------------------------------- |
-| **Ring source** | Not built-in — you implement it. PCM comes from decoded chunks written on the main thread         |
-| **Producer**    | After each chunk decode, copy `getChannelData(i)` at `chunk.startSec × sampleRate` |
-| **Consumer**    | `process(inputs, outputs)` advances `readIndex` each callback                                     |
-| **Seek**        | Reset `readIndex`, flush ring, refill from seek chunk                                             |
-| **Underrun**    | Output silence (or hold) when `readIndex` catches `writeIndex`                                    |
-
-
-
-| Pros                                              | Cons                                                          |
-| ------------------------------------------------- | ------------------------------------------------------------- |
-| One continuous output node; stable clock          | Extra processor file + `audioWorklet.addModule()`             |
-| Scales to long playback without N sources         | `SharedArrayBuffer` may need extra CSP/headers                |
-| Good base for future gapless/crossfade in worklet | Does **not** fix PCM discontinuities at encode cuts by itself |
-|                                                   | Harder to debug in VS Code webview                            |
-
-
-**When to consider Option B:** hour-long files, need tighter pull-based clock, or want gapless/crossfade logic colocated with sample output — after Option A is working.
-
----
-
-#### Chunk boundary noise (both options)
-
-Boundary clicks come from **two** causes:
-
-1. **Scheduling** — gaps/overlaps between chunks → mitigated by Option A `nextPlayTime` + underrun snap
-2. **Encode splice** — independent Ogg mini-files per slice → mitigated by **byte/frame-bounded chunk cuts + mandatory scheduler crossfade** (5 ms default) and backend chunk consistency (see [Chunk generation](#chunk-generation))
-
-AudioWorklet does not remove encode-splice discontinuities unless PCM is blended or chunks are sample-aligned at encode time.
-
-### Buffer policy
-
-`**chunkBufferCount`** (VS Code setting) — number of chunks in the forward buffer, **including the current chunk**:
+### Pipeline
 
 ```
-playhead = P, chunkBufferCount = C
-→ hold / fetch chunks: P, P+1, …, P + C − 1
+loadMedia(serverUrl, audioId)
+  → GET /index → manifest
+  → GET /chunk/{n} (window around playhead)
+  → decode chunk → PCM
+  → scheduler → speakers
 ```
 
-Example: playing chunk **10**, `chunkBufferCount = 5` → chunks **10, 11, 12, 13, 14** (5 chunks, not 4).
+### Components (`StreamingAudioEngine`)
 
-At 1 s/chunk, `chunkBufferCount = 5` ≈ 5 s of audio from the playhead. ChunkLoader tops up the window as playback advances.
 
-**Behind playhead** (separate, not part of `chunkBufferCount`):
+| Component | Role |
+| --- | --- |
+| **IndexClient** | Fetch manifest; chunk map with `startSec` / `endSec` |
+| **ChunkLoader** | Buffer `[playhead … playhead + chunkBufferCount − 1]`; abort on seek |
+| **ChunkDecoder** | `decodeAudioData` or WebCodecs → `AudioBuffer` per chunk |
+| **Scheduler** | PCM → continuous output (see below) |
 
-- Keep **2 chunks** behind playhead in the PCM ring for quick rewind; evict older data.
+### Schedulers
 
-**On seek:** cancel in-flight fetches, reset ring, fetch the seek chunk first, then fill `[playhead, playhead + chunkBufferCount − 1]`.
 
-### Decode chunk → PCM
+| | Option A (reference) | Option B (production) |
+| --- | --- | --- |
+| **Mechanism** | Chain `AudioBufferSourceNode` on `nextPlayTime` | `AudioWorklet` pulls from ring buffer every ~128 frames |
+| **Files** | — | `streamingAudioEngine.js`, `pcmRing.js`, `pcmWorkletProcessor.js`, `workletScheduler.js` |
+| **Trade-off** | Simple; no worklet CSP | One output node; pull-based clock in production player |
 
-Each chunk is a **short encoded file** (complete Ogg/FLAC stream for that time range). Flow:
+Production playback uses Option B: `WorkletScheduler.writePcm()` keeps the ring stocked; the audio thread fills output buffers in `process()`. Details: [frontend.md — Scheduler options](frontend.md#scheduler-options).
 
-1. `fetch(\`${serverUrl}/chunk/${n}?audioId=${id})`→`ArrayBuffer`
-2. Decode to `AudioBuffer` (small — ~1 s × 48 kHz × 2 ch ≈ manageable)
-3. Copy channel data into ring at offset `chunk.startSec` from manifest (account for variable chunk duration and sample-accurate alignment in v2)
+### Buffer policy (summary)
 
-**Gapless policy (v1):** fast seek + `nextPlayTime` scheduling + **always-on micro-crossfade** between adjacent decoded chunks.
+- **Forward:** `chunkBufferCount` chunks from playhead (default 5 ≈ 5 s at 1 s/chunk).
+- **Behind:** ~2 chunks retained for quick rewind.
+- **Seek:** cancel fetches, reset buffer/scheduler, refill from seek chunk.
+- **Join:** 5 ms crossfade between adjacent chunks (follow-up; not yet implemented)
 
-- Default crossfade: **5 ms**
-- Allowed config range: **2-10 ms**
-- Apply at every chunk join, including after seek when adjacent chunks are available
+### UI (`player.js`)
 
-### UI integration (`player.js`)
-
-- `loadMedia` provides `serverUrl` + `audioId`; all fetches append `?audioId=${audioId}`
-- `streamStatus` messages: `{ type: 'streamStatus', phase: 'index' | 'chunk', status: 'started' | 'ready' | 'failed', … }`
-- Debug panel: buffered time range (e.g. `6.0–11.0 s`), never `full file`
-
-### Playback state machine
-
-```
-idle → loadingIndex → ready → playing ⇄ paused
-              ↓ seek
-         loadingChunks(seekTarget) → ready/playing
-```
+- Controls wired to `StreamingAudioEngine` (play, pause, seek, volume).
+- `streamStatus` events for debug panel (index/chunk phase, buffered ranges).
 
 ---
 
@@ -871,7 +747,7 @@ Single pass — ship only when legacy paths are gone.
 
 ### Planning (this doc)
 
-- Goals, API, cache layout, buffer policy
+- Goals, API, cache layout — this file; buffer policy and schedulers — [frontend.md](frontend.md)
 - Chunk strategy: **frame-aligned ~1 s chunks inferred from scanned frame times**; `chunkBufferCount`: **5**
 - Stream-only: **no legacy code paths**
 - Ogg vs FLAC default for streaming
@@ -890,14 +766,14 @@ Single pass — ship only when legacy paths are gone.
 
 - `playerPanel.ts` — `registerAudio` / `unregisterAudio`; new `loadMedia` shape
 - **Delete** `prepareAndPlay` transcode wait, `PreparedPlayback`, `transcodeStatus`
-- `streamingAudioEngine.js` — index + chunk loader + ring + play / pause / seek
-- **Delete** `audioEngine.js`
-- `player.js` + `player.html` — wire new engine and `streamStatus`
+- `streamingAudioEngine.js` — index + chunk loader + `WorkletScheduler` play / pause / seek (Option B)
+- `player.js` + `player.html` — wire engine, worklet CSP/meta, and `streamStatus`
 - Grep confirms zero references: `preparePlayback`, `ensureTranscodedAudio`, `/audio`, `AudioEngine`, `transcodeForPlayback`
 
 ### Polish
 
 - Host background prefetch within `chunkBufferCount` window (optional)
+- Chunk crossfade (5 ms) in worklet or main thread
 - Update `package.json` description and README
 
 ---
@@ -920,7 +796,7 @@ Single pass — ship only when legacy paths are gone.
 | Index transport       | **JSON over HTTP**                                     | Easy to debug in VS Code webview                                           |
 | Probe tool            | **ffprobe**                                            | Accurate duration; falls back to ffmpeg stderr parse                       |
 | PCM output            | **Float32, interleaved channels in ring**              | Matches `AudioBuffer` channel layout                                       |
-| Scheduler (v1)        | **Option A** — chained `BufferSource` + `nextPlayTime` | Simple, webview-friendly; Worklet deferred                                 |
+| Scheduler             | **Option B** — `WorkletScheduler` + `AudioWorklet` ring | One output node; pull-based clock; CSP validated in webview |
 | Chunk FFmpeg          | **`-byte_seek 1`, `-ss {startByte}B`, `-frames:a {frameCount}`** | Byte-accurate chunk entry + frame-count bounded chunk exit               |
 | Chunk join strategy   | **Always-on 5 ms crossfade**                           | Masks splice pops from independently encoded chunks                        |
 
@@ -936,6 +812,8 @@ Single pass — ship only when legacy paths are gone.
 | Chunk boundary clicks/pops                 | Byte/frame-bounded chunk cuts + always-on 5 ms crossfade; tune 2-10 ms if needed                    |
 | Slow seek on late chunks                   | Use indexed byte seek (`-byte_seek 1`, `-ss {startByte}B`) to avoid linear time-based decode paths  |
 | VS Code webview CSP blocks localhost       | Already fetching `127.0.0.1` today — keep same pattern                                              |
+| VS Code webview AudioWorklet               | Fetch+blob `addModule`, meta tag for module URL, CSP `blob:`/`worker-src`/`connect-src` — apply in `player.html` on integration |
+| Ring buffer overrun (Option B)             | `writeBlock` caps at `freeFrames`; main thread waits on `writeAck` before next write                |
 | Stale `audioId` after unregister           | `404` on fetch; webview shows error; extension re-registers on new open                             |
 | Registry memory growth                     | `unregisterAudio` on tab dispose; optional TTL for orphaned ids                                     |
 | Last chunk shorter than `chunkDurationSec` | Manifest lists exact `durationSec`; decoder uses actual decoded length                              |
@@ -947,7 +825,7 @@ Single pass — ship only when legacy paths are gone.
 ## Open questions
 
 1. **Ogg vs FLAC for streaming** — Ogg smaller/faster transcode; FLAC better for quality. Keep user setting?
-2. ~~**AudioWorklet vs chained BufferSource**~~ — **Resolved:** v1 = Option A (`nextPlayTime`); Option B documented in [Scheduler options](#scheduler-options), deferred
+2. ~~**AudioWorklet vs chained BufferSource**~~ — **Resolved:** production player = Option B (`WorkletScheduler` in `streamingAudioEngine.js`); see [frontend.md — Option B](frontend.md#option-b-audioworklet--ring-buffer-production)
 3. **Progress UX** — Show “Buffering chunk N/M” or only spinner until first audible chunk?
 
 ---
@@ -966,6 +844,7 @@ Single pass — ship only when legacy paths are gone.
 ## References
 
 - Tab open: `src/mediaEditorProvider.ts` → `src/playerPanel.ts`
+- Webview playback: [frontend.md](frontend.md) — `streamingAudioEngine.js`, Option B scheduler, buffer policy
 - CMAF: [ISO/IEC 23000-19](https://www.iso.org/standard/71975.html) (manifest + segments); CNAP is a local simplification
 - **Removed by this refactor:** `playbackServer.ts` `/audio` path, `transcode.ts`, `audioEngine.js`
 

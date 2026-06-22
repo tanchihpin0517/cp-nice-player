@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} https:; connect-src {{cspSource}} http://127.0.0.1:* http://localhost:*; style-src {{cspSource}}; script-src {{cspSource}};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} https:; connect-src {{cspSource}} http://127.0.0.1:* http://localhost:*; style-src {{cspSource}}; script-src {{cspSource}} 'self' blob:; worker-src {{cspSource}} 'self' blob:;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="cp-worklet-module-url" content="{{workletProcessorUri}}">
   <title>CP's Nice Player</title>
   <link rel="stylesheet" href="{{styleUri}}">
 </head>
@@ -40,6 +41,8 @@
       </div>
     </details>
   </main>
+  <script src="{{pcmRingUri}}"></script>
+  <script src="{{workletSchedulerUri}}"></script>
   <script src="{{engineScriptUri}}"></script>
   <script src="{{scriptUri}}"></script>
 </body>
