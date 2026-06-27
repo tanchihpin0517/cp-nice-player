@@ -55,7 +55,6 @@ class StreamingAudioEngine extends EventTarget {
     this.manifest = null;
     this.chunkBufferCount = 5;
     this.chunkDurationSec = 1;
-    this.fetchConcurrency = 1;
     this.loadGeneration = 0;
     this.indexFetchAbort = null;
     this.fetchAbortControllers = new Map();
@@ -85,7 +84,6 @@ class StreamingAudioEngine extends EventTarget {
     this.mediaName = options.name || '';
     this.chunkBufferCount = Math.max(1, Number(options.chunkBufferCount) || 5);
     this.chunkDurationSec = Math.max(0.5, Number(options.chunkDurationSec) || 1);
-    this.fetchConcurrency = Math.max(1, Number(options.fetchConcurrency) || 1);
     this.pausedAt = 0;
     this.decoderType = 'none';
 
@@ -234,7 +232,6 @@ class StreamingAudioEngine extends EventTarget {
       serverUrl: this.serverUrl,
       audioId: this.audioId,
       chunkBufferCount: this.chunkBufferCount,
-      fetchConcurrency: this.fetchConcurrency,
       currentChunkIndex: currentChunk,
       fetchInFlight: formatChunkRanges(fetchInFlight),
       fetchLoopActive: this._fetchTimer != null,
@@ -451,23 +448,14 @@ class StreamingAudioEngine extends EventTarget {
     if (!this.manifest) {
       return;
     }
+    if (this.fetchInFlight.size > 0) {
+      this._updateBufferingState();
+      return;
+    }
     const generation = this.loadGeneration;
     const { currentChunk, targetEnd } = this._getBufferWindow();
-
-    let inFlightInWindow = 0;
     for (let index = currentChunk; index <= targetEnd; index += 1) {
-      if (this.fetchInFlight.has(index)) {
-        inFlightInWindow += 1;
-      }
-    }
-    const slotsAvailable = Math.max(0, this.fetchConcurrency - inFlightInWindow);
-    let started = 0;
-
-    for (let index = currentChunk; index <= targetEnd; index += 1) {
-      if (started >= slotsAvailable) {
-        break;
-      }
-      if (this.encodedChunks.has(index) || this.fetchInFlight.has(index)) {
+      if (this.encodedChunks.has(index)) {
         continue;
       }
       void this._fetchChunk(index, generation).catch((error) => {
@@ -475,9 +463,8 @@ class StreamingAudioEngine extends EventTarget {
           this._emit('error', { message: String(error) });
         }
       });
-      started += 1;
+      break;
     }
-
     this._updateBufferingState();
   }
 

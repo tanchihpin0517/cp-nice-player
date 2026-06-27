@@ -1,14 +1,22 @@
 # Frontend design
 
-Webview playback for CP's Nice Player — `StreamingAudioEngine`, schedulers, buffer policy, and UI integration.
+Webview playback for CP's Nice Player.
 
-**Related:** [Streaming playback architecture](stream.md) (backend, CNAP API, cache, end-to-end sequence).
+| Player | Engine |
+|--------|--------|
+| `media/player/` (`player.html`, `player.js`, `player.css`) | `media/engine/` (`streamingAudioEngine.js`, worklet modules) |
+
+Extension: `src/playerPanel/playerSession.ts` via `createPlayerSession()`.
+
+**Streaming stack** — `StreamingAudioEngine` (chunked HTTP → PCM → Web Audio Option B).
+
+**Related:** [Streaming playback architecture](stream.md) (backend, stream API, cache, end-to-end sequence).
 
 ---
 
-### `StreamingAudioEngine` (replaces `AudioEngine`)
+### `StreamingAudioEngine` (`media/engine/streamingAudioEngine.js`)
 
-Stream-only playback — replace monolithic `load()` + single `AudioBuffer` with:
+Stream-only playback — replaces monolithic `load()` + single `AudioBuffer` with:
 
 
 | Component        | Responsibility                                                                                                                   |
@@ -75,7 +83,7 @@ nextPlayTime += audioBuffer.duration;   // actual decoded length, not fixed 1s
 | Fast to ship and debug in webview                       |                                                                                                |
 
 
-**Historical reference:** Option A was the initial v1 implementation; production now uses Option B in [`streamingAudioEngine.js`](media/streamingAudioEngine.js).
+**Historical reference:** Option A was the initial v1 implementation; production player uses Option B in [`streamingAudioEngine.js`](../media/engine/streamingAudioEngine.js).
 
 ---
 
@@ -120,7 +128,7 @@ Each `process()` call is a small memcopy (~256 floats stereo ≪ 2.9 ms budget).
 
 | File | Role |
 | --- | --- |
-| [`media/pcmRing.js`](../media/pcmRing.js) | Main-thread circular buffer helper (capacity tracking; used by `WorkletScheduler` for sizing; PCM path goes to worklet via messages) |
+| [`media/engine/pcmRing.js`](../media/engine/pcmRing.js) | Main-thread circular buffer helper (capacity tracking; used by `WorkletScheduler` for sizing; PCM path goes to worklet via messages) |
 | [`media/pcmWorkletProcessor.js`](../media/pcmWorkletProcessor.js) | `AudioWorkletProcessor` + in-worklet `PcmRingReader` |
 | [`media/workletScheduler.js`](../media/workletScheduler.js) | Load worklet module, `AudioWorkletNode`, `writePcm` with backpressure, play/pause/reset |
 
@@ -257,7 +265,7 @@ Flow: ring → memcopy → `outputs` → DAC. The worklet must fill every output
 
 ##### `WorkletScheduler` API
 
-Main-thread coordinator — replaces Option A’s `nextPlayTime` / `BufferSource` scheduling. **Wired into [`streamingAudioEngine.js`](media/streamingAudioEngine.js).**
+Main-thread coordinator — replaces Option A’s `nextPlayTime` / `BufferSource` scheduling. **Wired into [`streamingAudioEngine.js`](../media/engine/streamingAudioEngine.js).**
 
 ```js
 // Requires pcmRing.js + workletScheduler.js (and pcmWorkletProcessor.js loaded by scheduler)

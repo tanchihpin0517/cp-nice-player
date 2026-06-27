@@ -1,8 +1,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { AudioRegistry } from './audioRegistry';
-import { computeCacheDirName, getStreamCacheDir } from './streamCache';
+import { Registry } from './registry';
+import { computeCacheDirName, getStreamCacheDir } from './cache';
 
 export class AudioNotFoundError extends Error {
 	constructor(audioId: string) {
@@ -25,14 +25,12 @@ export interface StreamContext {
 }
 
 export async function resolveStreamContext(
-	registry: AudioRegistry,
+	registry: Registry,
 	context: vscode.ExtensionContext,
 	audioId: string,
 ): Promise<StreamContext> {
-	let fsPath: string;
-	try {
-		fsPath = registry.resolveAudioId(audioId);
-	} catch {
+	const fsPath = registry.resolveAudioId(audioId);
+	if (!fsPath) {
 		throw new AudioNotFoundError(audioId);
 	}
 

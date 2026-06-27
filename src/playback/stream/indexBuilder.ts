@@ -1,16 +1,14 @@
 import * as fs from 'fs/promises';
-import * as vscode from 'vscode';
-import { getChunkDurationSec, getPlaybackFormat } from '../config';
-import { FfmpegCheckResult } from '../ffmpeg';
-import { AudioRegistry } from './audioRegistry';
+import { getChunkDurationSec, getPlaybackFormat } from '../../config';
+import { FfmpegCheckResult } from '../../ffmpegHost';
 import { inferFrameAlignedChunks, ChunkEntry } from './chunkPlanner';
 import { scanAudioFrames } from './probe';
 import {
 	contentTypeForFormat,
 	indexJsonPath,
 	outputExtForFormat,
-} from './streamCache';
-import { resolveStreamContext } from './streamResolve';
+} from './cache';
+import { StreamContext } from './resolve';
 
 export interface StreamIndexManifest {
 	version: 1;
@@ -61,7 +59,7 @@ function isValidChunkEntry(value: unknown, index: number, prev?: ChunkEntry): va
 	return true;
 }
 
-function isValidManifest(value: unknown): value is StreamIndexManifest {
+export function isValidStreamIndexManifest(value: unknown): value is StreamIndexManifest {
 	if (!value || typeof value !== 'object') {
 		return false;
 	}
@@ -136,7 +134,7 @@ async function readCachedIndex(indexPath: string): Promise<StreamIndexManifest |
 	try {
 		const cached = await fs.readFile(indexPath, 'utf8');
 		const parsed: unknown = JSON.parse(cached);
-		if (isValidManifest(parsed)) {
+		if (isValidStreamIndexManifest(parsed)) {
 			return parsed;
 		}
 	} catch {
@@ -153,27 +151,10 @@ export function getChunkEntry(manifest: StreamIndexManifest, index: number): Chu
 	return chunk;
 }
 
-export function findChunkIndexForTime(manifest: StreamIndexManifest, timeSec: number): number {
-	const chunks = manifest.chunking.chunks;
-	if (chunks.length === 0) {
-		return 0;
-	}
-	const clamped = Math.max(0, Math.min(timeSec, manifest.durationSec));
-	for (let i = chunks.length - 1; i >= 0; i -= 1) {
-		if (clamped >= chunks[i].startSec) {
-			return i;
-		}
-	}
-	return 0;
-}
-
 export async function getOrCreateIndex(
-	context: vscode.ExtensionContext,
-	registry: AudioRegistry,
-	audioId: string,
+	streamCtx: StreamContext,
 	ffmpeg: FfmpegCheckResult,
 ): Promise<IndexResult> {
-	const streamCtx = await resolveStreamContext(registry, context, audioId);
 	const indexPath = indexJsonPath(streamCtx.cacheDirFsPath);
 	const cached = await readCachedIndex(indexPath);
 	if (cached) {

@@ -3,7 +3,7 @@ import {
 	clearFfmpegCache,
 	FFMPEG_MISSING_NOTIFIED_KEY,
 	warmFfmpegAndNotifyOnce,
-} from './ffmpeg';
+} from './ffmpegHost';
 import { MEDIA_EDITOR_VIEW_TYPE, MediaEditorProvider } from './mediaEditorProvider';
 import { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
 import { PlaybackService } from './playback/playbackService';

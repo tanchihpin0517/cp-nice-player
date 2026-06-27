@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { checkFfmpegAvailable } from './ffmpeg';
+import { checkFfmpegAvailable } from './ffmpegHost';
 import { PlaybackService } from './playback/playbackService';
-import { getResourceRoots, MediaPlayerSession } from './playerPanel';
+import { getResourceRoots, createPlayerSession } from './playerPanel';
 
 export const MEDIA_EDITOR_VIEW_TYPE = 'cpNicePlayer.mediaPreview';
 
@@ -10,7 +10,7 @@ interface MediaCustomDocument extends vscode.CustomDocument {
 }
 
 export class MediaEditorProvider implements vscode.CustomReadonlyEditorProvider<MediaCustomDocument> {
-	private readonly sessions = new WeakMap<vscode.WebviewPanel, MediaPlayerSession>();
+	private readonly sessions = new WeakMap<vscode.WebviewPanel, ReturnType<typeof createPlayerSession>>();
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -46,7 +46,7 @@ export class MediaEditorProvider implements vscode.CustomReadonlyEditorProvider<
 			localResourceRoots: resourceRoots,
 		};
 
-		const session = new MediaPlayerSession(
+		const session = createPlayerSession(
 			webviewPanel,
 			this.context.extensionUri,
 			resourceRoots,

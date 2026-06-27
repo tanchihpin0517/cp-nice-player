@@ -84,7 +84,6 @@ function updateDebugPanel() {
     renderDebugField('audioId', debugContext.audioId),
     renderDebugField('playbackFormat', debugContext.debug.playbackFormat),
     renderDebugField('chunkBufferCount', String(debugContext.debug.chunkBufferCount)),
-    renderDebugField('fetchConcurrency', String(debugContext.debug.fetchConcurrency)),
     renderDebugField('ffmpeg', debugContext.debug.ffmpeg?.available ? 'available' : 'missing'),
     renderDebugField('decoder', diag.decoderType),
     renderDebugField('context', diag.contextState),
@@ -139,7 +138,6 @@ async function loadMediaMessage(message) {
       name: message.name,
       chunkBufferCount: message.debug.chunkBufferCount,
       chunkDurationSec: message.debug.chunkDurationSec,
-      fetchConcurrency: message.debug.fetchConcurrency,
     });
     trackState.textContent = 'Ready';
     setControlsEnabled(true);

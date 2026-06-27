@@ -5,6 +5,24 @@ All notable changes to **CP's Nice Player** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Setting `cp-nice-player.playback.debugLogging` to opt into verbose playback server and FFmpeg console logs (default `false`).
+- Unit tests for stream cache helpers, route matching, and stream-index manifest validation.
+
+### Changed
+
+- Chunk fetching is always sequential now (one in-flight download at a time) and server-side FFmpeg transcode is serialized to a single process.
+- Playback server startup no longer shows an information toast on every launch.
+- Internal restructure: playback engine moved to `src/playback/stream/`, the webview session split into `src/playerPanel/`, and `src/ffmpeg.ts` renamed to `src/ffmpegHost.ts`.
+- Media assets folders renamed to singular: `media/player/` and `media/engine/`.
+
+### Removed
+
+- Setting `cp-nice-player.playback.fetchConcurrency` (replaced by always-sequential fetching).
+
 ## [0.1.4] - 2026-06-17
 
 ### Changed

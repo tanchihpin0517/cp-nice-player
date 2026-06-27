@@ -1,11 +1,10 @@
 import * as http from 'http';
 import * as vscode from 'vscode';
-import { checkFfmpegAvailable, FfmpegCheckResult } from '../ffmpeg';
-import { AudioRegistry } from './audioRegistry';
-import { cleanStreamCacheDir } from './streamCache';
-import { getOrCreateChunk, ChunkOutOfRangeError } from './streamChunk';
-import { getOrCreateIndex } from './streamIndex';
-import { resolveStreamContext, AudioNotFoundError, SourceNotFoundError } from './streamResolve';
+import { FfmpegCheckResult } from '../ffmpegHost';
+import { cleanStreamCacheDir } from './stream/cache';
+import { registerAudio as registerStreamAudio, RegisterResult } from './stream/registrar';
+import { Registry } from './stream/registry';
+import { createRouteHandlers, matchRoute } from './stream/routes';
 
 export class PlaybackServer implements vscode.Disposable {
 	private server: http.Server | undefined;
@@ -13,9 +12,12 @@ export class PlaybackServer implements vscode.Disposable {
 	private port: number | undefined;
 	private externalUrl: string | undefined;
 	private disposed = false;
-	private readonly registry = new AudioRegistry();
+	private readonly registry = new Registry();
+	private readonly routeHandlers: ReturnType<typeof createRouteHandlers>;
 
-	constructor(private readonly context: vscode.ExtensionContext) {}
+	constructor(private readonly context: vscode.ExtensionContext) {
+		this.routeHandlers = createRouteHandlers(this.registry, this.context);
+	}
 
 	async start(): Promise<number> {
 		if (this.disposed) {
@@ -51,15 +53,8 @@ export class PlaybackServer implements vscode.Disposable {
 		}
 	}
 
-	async registerAudio(fsPath: string, ffmpeg: FfmpegCheckResult): Promise<string> {
-		const audioId = this.registry.registerAudio(fsPath);
-		try {
-			await getOrCreateIndex(this.context, this.registry, audioId, ffmpeg);
-			return audioId;
-		} catch (err) {
-			this.registry.unregisterAudio(audioId);
-			throw err;
-		}
+	async registerAudio(fsPath: string, ffmpeg: FfmpegCheckResult): Promise<RegisterResult> {
+		return registerStreamAudio(this.context, this.registry, fsPath, ffmpeg);
 	}
 
 	unregisterAudio(audioId: string): void {
@@ -73,12 +68,12 @@ export class PlaybackServer implements vscode.Disposable {
 	dispose(): void {
 		this.disposed = true;
 		this.registry.clear();
+		cleanStreamCacheDir(this.context);
 		this.server?.close();
 		this.server = undefined;
 		this.listenPromise = undefined;
 		this.port = undefined;
 		this.externalUrl = undefined;
-		cleanStreamCacheDir(this.context);
 	}
 
 	private bindServer(): Promise<number> {
@@ -108,9 +103,6 @@ export class PlaybackServer implements vscode.Disposable {
 				console.log(
 					`cp-nice-player: Playback server started on ${this.externalUrl}.`,
 				);
-				void vscode.window.showInformationMessage(
-					`CP's Nice Player: Playback server started on ${this.externalUrl}.`,
-				);
 				resolve(this.port);
 			});
 		});
@@ -120,11 +112,9 @@ export class PlaybackServer implements vscode.Disposable {
 		if (!origin) {
 			return undefined;
 		}
-		// Desktop editors: Match vscode-webview://, cursor-webview://, vscodium-webview://, etc.
 		if (/^[a-z0-9-]+-webview:\/\//i.test(origin)) {
 			return origin;
 		}
-		// Browser editors (VS Code for the Web, github.dev): Match https://*.vscode-cdn.net
 		if (origin.startsWith('https://') && origin.endsWith('.vscode-cdn.net')) {
 			return origin;
 		}
@@ -152,119 +142,14 @@ export class PlaybackServer implements vscode.Disposable {
 		}
 
 		const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
+		const handler = matchRoute(this.routeHandlers, url.pathname);
 
-		if (req.method === 'GET' && url.pathname === '/index') {
-			await this.handleIndexRoute(url, res);
-			return;
-		}
-
-		const chunkMatch = url.pathname.match(/^\/chunk\/(\d+)$/);
-		if (req.method === 'GET' && chunkMatch) {
-			await this.handleChunkRoute(url, Number(chunkMatch[1]), res);
+		if (req.method === 'GET' && handler) {
+			await handler(req, res, url);
 			return;
 		}
 
 		res.writeHead(404, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({ error: 'Not found' }));
-	}
-
-	private getAudioId(url: URL): string | undefined {
-		const audioId = url.searchParams.get('audioId')?.trim();
-		return audioId && audioId.length > 0 ? audioId : undefined;
-	}
-
-	private async handleIndexRoute(url: URL, res: http.ServerResponse): Promise<void> {
-		const audioId = this.getAudioId(url);
-		if (!audioId) {
-			res.writeHead(400, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ error: 'Missing or invalid audioId query param' }));
-			return;
-		}
-
-		try {
-			const ffmpeg = await checkFfmpegAvailable();
-			if (!ffmpeg.available) {
-				throw new Error(ffmpeg.error ?? 'FFmpeg is not available.');
-			}
-
-			const index = await getOrCreateIndex(this.context, this.registry, audioId, ffmpeg);
-			console.log(`cp-nice-player: index audioId=${audioId} cache=${index.cache}`);
-			res.writeHead(200, {
-				'Content-Type': 'application/json',
-				'X-Cache': index.cache,
-			});
-			res.end(JSON.stringify(index.manifest));
-		} catch (err) {
-			this.sendError(res, err, audioId);
-		}
-	}
-
-	private async handleChunkRoute(
-		url: URL,
-		chunkIndex: number,
-		res: http.ServerResponse,
-	): Promise<void> {
-		const audioId = this.getAudioId(url);
-		if (!audioId) {
-			res.writeHead(400, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ error: 'Missing or invalid audioId query param' }));
-			return;
-		}
-
-		if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
-			res.writeHead(400, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ error: 'Invalid chunk index' }));
-			return;
-		}
-
-		try {
-			const ffmpeg = await checkFfmpegAvailable();
-			if (!ffmpeg.available) {
-				throw new Error(ffmpeg.error ?? 'FFmpeg is not available.');
-			}
-
-			const streamCtx = await resolveStreamContext(this.registry, this.context, audioId);
-			const index = await getOrCreateIndex(this.context, this.registry, audioId, ffmpeg);
-			const chunk = await getOrCreateChunk(
-				streamCtx,
-				ffmpeg,
-				chunkIndex,
-				index.manifest,
-			);
-
-			console.log(
-				`cp-nice-player: chunk ${chunk.index} audioId=${audioId} cache=${chunk.cache}`,
-			);
-			res.writeHead(200, {
-				'Content-Type': chunk.contentType,
-				'Content-Length': chunk.buffer.length,
-				'X-Cache': chunk.cache,
-				'X-Chunk-Index': String(chunk.index),
-				'X-Chunk-Start-Sec': String(chunk.startSec),
-				'X-Chunk-Duration-Sec': String(chunk.durationSec),
-			});
-			res.end(chunk.buffer);
-		} catch (err) {
-			this.sendError(res, err, audioId);
-		}
-	}
-
-	private sendError(res: http.ServerResponse, err: unknown, audioId: string): void {
-		if (err instanceof AudioNotFoundError || err instanceof SourceNotFoundError) {
-			res.writeHead(404, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ error: err.message }));
-			return;
-		}
-
-		if (err instanceof ChunkOutOfRangeError) {
-			res.writeHead(404, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ error: err.message }));
-			return;
-		}
-
-		const message = err instanceof Error ? err.message : String(err);
-		console.error(`cp-nice-player: request failed for audioId=${audioId}`, err);
-		res.writeHead(500, { 'Content-Type': 'application/json' });
-		res.end(JSON.stringify({ error: message }));
 	}
 }

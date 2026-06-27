@@ -1,6 +1,6 @@
 import * as assert from 'assert';
-import { inferFrameAlignedChunks } from '../playback/chunkPlanner';
-import { AudioPacket, durationFromPackets } from '../playback/probe';
+import { inferFrameAlignedChunks } from '../playback/stream/chunkPlanner';
+import { AudioPacket, durationFromPackets } from '../playback/stream/probe';
 
 function packet(
 	index: number,

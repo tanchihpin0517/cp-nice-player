@@ -8,7 +8,7 @@ import {
 	getPlaybackFormat,
 	getPlaybackOggQuality,
 	PlaybackFormat,
-} from '../config';
+} from '../../config';
 
 const STREAM_DIR_NAME = 'stream';
 const MAX_BASENAME_LENGTH = 80;

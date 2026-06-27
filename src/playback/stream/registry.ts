@@ -5,7 +5,7 @@ export interface AudioEntry {
 	registeredAt: number;
 }
 
-export class AudioRegistry {
+export class Registry {
 	private readonly entries = new Map<string, AudioEntry>();
 
 	registerAudio(fsPath: string): string {
@@ -22,12 +22,8 @@ export class AudioRegistry {
 		this.entries.delete(audioId);
 	}
 
-	resolveAudioId(audioId: string): string {
-		const entry = this.entries.get(audioId);
-		if (!entry) {
-			throw new Error(`Unknown audioId: ${audioId}`);
-		}
-		return entry.fsPath;
+	resolveAudioId(audioId: string): string | undefined {
+		return this.entries.get(audioId)?.fsPath;
 	}
 
 	clear(): void {

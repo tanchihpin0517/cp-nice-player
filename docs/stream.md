@@ -4,6 +4,8 @@ This document is the **full refactor spec** for CP's Nice Player playback. The o
 
 Inspired by [CMAF](https://en.wikipedia.org/wiki/Common_Media_Application_Format) (index + fetchable segments), adapted for a **local VS Code extension**: FFmpeg on the host, chunked HTTP, Web Audio in the webview.
 
+**Production:** chunked streaming playback only. See [Backend stack](#backend-stack).
+
 **Docs:** backend and protocol — this file; webview playback — [frontend.md](frontend.md).
 
 ## Scope
@@ -242,7 +244,7 @@ flowchart LR
 
 ---
 
-## CNAP — CP Nice Audio Package (working name)
+## Stream manifest format
 
 A minimal “our CMAF” for local audio: **one manifest + many segment files**, no ISO BMFF requirement.
 
@@ -405,35 +407,32 @@ Simple `GET` with query params uses only CORS-safelisted headers — **no extra 
 
 ---
 
-## Backend design
+## Backend stack
 
-### Target module layout (after refactor)
+Streaming backend under `src/playback/stream/`. Shared shell: `playbackServer.ts` (CORS + listen + dispatch) and `playbackService.ts`.
+
+| Backend tree | HTTP routes |
+|--------------|-------------|
+| `stream/` | `GET /index`, `GET /chunk/{n}` |
 
 ```
 src/playback/
-  playbackServer.ts      # start() wipes stream/; HTTP /index, /chunk/:n; registerAudio / unregisterAudio
-  playbackService.ts   # lifecycle wrapper
-  playbackService.ts     # unchanged role: lifecycle wrapper
-  audioRegistry.ts       # audioId ↔ fsPath
-  streamCache.ts         # cache dir naming, hash, getStreamCacheDir — replaces transcode.ts
-  streamResolve.ts       # audioId → fsPath → cacheDirName
-  streamIndex.ts         # probe + build/cache index.json
-  streamChunk.ts         # per-chunk FFmpeg transcode + disk read
-  probe.ts               # ffprobe wrapper
-
-src/ffmpeg.ts            # keep runFfmpeg, checkFfmpeg; add transcodeChunk(); delete transcodeForPlayback()
-src/playerPanel.ts       # registerAudio → loadMedia(serverUrl, audioId); no preparePlayback wait
-
-media/
-  streamingAudioEngine.js   # production player — Option B WorkletScheduler; see frontend.md
-  pcmRing.js                # Option B — see frontend.md
-  pcmWorkletProcessor.js
-  workletScheduler.js
-  player.js
-  player.html
+  playbackServer.ts       # CORS, listen, registry + route dispatch
+  playbackService.ts
+  stream/
+    registry.ts
+    registrar.ts
+    routes.ts
+    chunkPlanner.ts, ffmpegChunk.ts, probe.ts, cache.ts, chunk.ts, indexBuilder.ts, resolve.ts
 ```
 
-**Delete** `src/playback/transcode.ts` after moving sanitizers/hash into `streamCache.ts`.
+Extension wiring: `src/playerPanel/` — `createPlayerSession()` returns `WebviewPlayerSession`. See [frontend.md](frontend.md) for the player tree.
+
+---
+
+## Backend design
+
+### Module layout
 
 ### Registration (on tab open, extension-internal)
 
@@ -451,7 +450,7 @@ Same root as today:
 {globalStorage}/stream/
 ```
 
-Naming helpers live in `streamCache.ts` (moved from deleted `transcode.ts`): `sanitizeFileStem`, `sanitizeSourceExt`, max 80 chars per segment. **One directory** per source:
+Naming helpers live in `cache.ts` (moved from deleted `transcode.ts`): `sanitizeFileStem`, `sanitizeSourceExt`, max 80 chars per segment. **One directory** per source:
 
 ```
 stream/
@@ -527,7 +526,7 @@ Not a legacy-only sweep; the stream directory is **always empty** while the serv
 ### Index creation (frame scan first)
 
 1. Read `audioId` query param → lookup `fsPath` in registry.
-2. Compute `cacheDirName` = `{fileStem}_{sourceExt}_{hash}` via `streamCache.ts`.
+2. Compute `cacheDirName` = `{fileStem}_{sourceExt}_{hash}` via `cache.ts`.
 3. If `{transcodeDir}/{cacheDirName}/index.json` exists and is valid → return it.
 4. Else scan audio frames once (ffprobe packet/frame listing), collecting frame index, `pts_time`, and byte position.
 5. Infer chunk boundaries with target length ~1.0 s by snapping to nearest valid frame boundary.
@@ -552,7 +551,7 @@ ffmpeg -nostats -loglevel quiet \
 | `-frames:a {frameCount}` | Hard output cutoff by frame count; does not rely on `-t` timing behavior |
 | `-f ogg pipe:1` | Stream chunk bytes directly for HTTP response without temp output target requirement |
 
-Implemented in `ffmpeg.transcodeChunk()`.
+Implemented in `stream/ffmpegChunk.ts` (`transcodeChunk`).
 
 **Join policy (v1):** use **mandatory micro-crossfade** in the scheduler at chunk boundaries (default 5 ms, configurable 2-10 ms) to mask splice discontinuities from independently encoded chunk files.
 
@@ -568,10 +567,9 @@ Implemented in `ffmpeg.transcodeChunk()`.
 
 ### Concurrency
 
-- Per source: `Map<(cacheDirName, chunkIndex), Promise<Buffer>>` dedupes duplicate in-flight requests (same file, same chunk).
-- Global: limit concurrent FFmpeg processes (e.g. 2) to avoid melting CPU on rapid scrubbing.
+- Webview: one chunk HTTP fetch at a time (sequential low-to-high within the buffer window).
+- Server: one FFmpeg transcode at a time via a serial mutex; `chunkInFlight` dedupes duplicate requests for the same chunk.
 - Multiple tabs on the same file may have different `audioId`s but share disk cache via the same `cacheDirName`.
-- In-flight chunk dedupe keyed by `(cacheDirName, chunkIndex)` covers all tabs.
 
 ### Config additions
 
@@ -581,6 +579,7 @@ Implemented in `ffmpeg.transcodeChunk()`.
   "default": 5,
   "description": "Number of chunks to buffer from the playhead, including the current chunk. Example: count 5 at chunk 10 → chunks 10–14."
 }
+"cp-nice-player.playback.debugLogging": { "default": false }
 ```
 
 `**chunkBufferCount**` — chunk count in the forward buffer, **including the current chunk**. Default **5** with frame-aligned ~1 s chunks (time window is approximately 5 s from the playhead).
@@ -624,7 +623,7 @@ Every legacy playback artifact is **deleted or rewritten** — not deprecated be
 
 #### Extract then delete
 
-From `transcode.ts` → `streamCache.ts`:
+From `transcode.ts` → `cache.ts`:
 
 - `sanitizeFileStem`, `sanitizeSourceExt`, `getTranscodeDir` (rename `getStreamCacheDir`)
 - `computeTranscodeHash` → `computeStreamCacheHash` (add `chunkDurationSec` to payload)
@@ -642,7 +641,8 @@ From `audioEngine.js` → `streamingAudioEngine.js`:
 | ------------------------ | ------------------------------------------------------------- |
 | `playbackService.ts`     | Server lifecycle                                              |
 | `mediaEditorProvider.ts` | Tab open → `loadMedia` (caller unchanged)                     |
-| `ffmpeg.ts`              | `checkFfmpegAvailable`, `runFfmpeg`                           |
+| `src/ffmpegHost.ts`      | `checkFfmpegAvailable`, host notifications                    |
+| `stream/ffmpegChunk.ts` | Per-chunk transcode (`transcodeChunk`)              |
 | `config.ts`              | `playback.format`, `playback.oggQuality` + new chunk settings |
 
 
@@ -754,11 +754,11 @@ Single pass — ship only when legacy paths are gone.
 
 ### Backend
 
-- `audioRegistry.ts`, `probe.ts`, `streamCache.ts`, `streamResolve.ts`, `streamIndex.ts`, `streamChunk.ts`
+- `audioRegistry.ts`, `probe.ts`, `cache.ts`, `resolve.ts`, `indexBuilder.ts`, `chunk.ts`
 - `playbackServer.ts` — `/index`, `/chunk/:n`, `registerAudio`, `unregisterAudio`
 - **Delete** `preparePlayback`, `GET /audio`, `preparedFilePath`, `PlaybackResult`
 - **Delete** `transcode.ts`; **delete** `ffmpeg.transcodeForPlayback`
-- Add `ffmpeg.transcodeChunk` (segment slice)
+- Add `stream/ffmpegChunk.transcodeChunk` (segment slice)
 - Sync `cleanStreamCacheDir()` on `PlaybackServer.start()` and `dispose()` — wipe entire `stream/`
 - Manual test: register → `curl '…/index?audioId=…'` → `curl '…/chunk/0?audioId=…'`
 
@@ -843,8 +843,8 @@ Single pass — ship only when legacy paths are gone.
 
 ## References
 
-- Tab open: `src/mediaEditorProvider.ts` → `src/playerPanel.ts`
-- Webview playback: [frontend.md](frontend.md) — `streamingAudioEngine.js`, Option B scheduler, buffer policy
-- CMAF: [ISO/IEC 23000-19](https://www.iso.org/standard/71975.html) (manifest + segments); CNAP is a local simplification
+- Tab open: `src/mediaEditorProvider.ts` → `src/playerPanel/index.ts` (`createPlayerSession`)
+- Webview playback: [frontend.md](frontend.md) — `media/player/`
+- CMAF: [ISO/IEC 23000-19](https://www.iso.org/standard/71975.html) (manifest + segments); this project is a local simplification
 - **Removed by this refactor:** `playbackServer.ts` `/audio` path, `transcode.ts`, `audioEngine.js`
 
