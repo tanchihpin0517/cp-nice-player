@@ -66,7 +66,7 @@ Cached chunks live under the extension's global storage and are cleared when the
 | `cp-nice-player.playback.chunkDurationSec` | `1` | Target duration of each streamed chunk in seconds (`0.5`–`10`). |
 | `cp-nice-player.playback.crossfadeMs` | `20` | Per-chunk overlap tail length in milliseconds (`0`–`500`). Non-final chunks encode a short tail past the body boundary; the player crossfades it with the next chunk. Set to `0` to disable crossfade. |
 | `cp-nice-player.playback.chunkBufferCount` | `5` | Number of chunks to buffer ahead of the playhead, including the current chunk. At 1 s chunks, `5` ≈ 5 s of buffered audio. |
-| `cp-nice-player.playback.debugLogging` | `false` | Log per-request playback server activity and FFmpeg commands to the extension host console. |
+| `cp-nice-player.playback.debugLogging` | `false` | Log playback settings and transcode template at startup, plus per-request server activity, to the extension host console. |
 
 ## Known limitations
 
@@ -75,6 +75,10 @@ Cached chunks live under the extension's global storage and are cleared when the
 - **Session cache** — Chunk cache is wiped when the playback server stops or VS Code reloads the extension.
 
 ## Release notes
+
+### 0.1.6
+
+Leaner webview debug UI and event log (fetch/decode completion only, with size and timing). Default crossfade is `20` ms. When `playback.debugLogging` is on, the extension logs effective settings at startup and one FFmpeg transcode template per server start.
 
 ### 0.1.5
 

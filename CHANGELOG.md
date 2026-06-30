@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-06-30
+
+### Changed
+
+- Default `playback.crossfadeMs` lowered from `50` to `20`.
+- Webview debug panel trimmed to essential playback state; channels and sample rates combined into one `audio` row.
+- Webview event log shows fetch and decode only on completion — fetch size as `B`/`KB`/`MB`, decode time as `time=<ms>ms(<pct>%)`.
+- Extension debug logging prints playback settings at activate and one FFmpeg chunk transcode template when the playback server starts, instead of logging every transcode command.
+
+### Removed
+
+- Redundant debug panel fields: mode, file name, FFmpeg availability, decoder type, index strategy, fetch/decode loop state, and scheduler label.
+- Unused webview logging: index stream-status events, per-chunk FFmpeg command logs, and `decoderwarning` / `decoderType` plumbing.
+
 ## [0.1.5] - 2026-06-30
 
 ### Added
@@ -100,6 +114,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio only — video tracks in container files are not played.
 - Chunk cache is session-scoped and cleared when the playback server stops or restarts.
 
+[0.1.6]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.6
 [0.1.5]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.5
 [0.1.4]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.4
 [0.1.3]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.3

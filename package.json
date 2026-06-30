@@ -1,7 +1,7 @@
 {
   "name": "cp-nice-player",
   "displayName": "CP's Nice Player",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "tanchihpin0517",
   "preview": true,
   "description": "Stream audio files inside VS Code with chunked, low-latency playback powered by FFmpeg and Web Audio.",
@@ -97,7 +97,7 @@
         "cp-nice-player.playback.debugLogging": {
           "type": "boolean",
           "default": false,
-          "description": "Log per-request playback server activity and FFmpeg commands to the extension host console."
+          "description": "Log playback settings and transcode template at startup, plus per-request server activity, to the extension host console."
         }
       }
     }

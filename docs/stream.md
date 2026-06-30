@@ -382,7 +382,6 @@ The webview does **not** initiate open-media or registration. It only sends `{ t
     playbackOggQuality: number,
     chunkDurationSec: number,
     chunkBufferCount: number,
-    ffmpeg: { available, path, version?, error? },
   },
 }
 ```
@@ -579,6 +578,7 @@ Implemented in `stream/ffmpegChunk.ts` (`transcodeChunk`).
   "default": 5,
   "description": "Number of chunks to buffer from the playhead, including the current chunk. Example: count 5 at chunk 10 → chunks 10–14."
 }
+"cp-nice-player.playback.crossfadeMs": { "default": 20, "minimum": 0, "maximum": 500 }
 "cp-nice-player.playback.debugLogging": { "default": false }
 ```
 
@@ -690,12 +690,12 @@ Production playback uses Option B: `WorkletScheduler.writePcm()` keeps the ring 
 - **Forward:** `chunkBufferCount` chunks from playhead (default 5 ≈ 5 s at 1 s/chunk).
 - **Behind:** ~2 chunks retained for quick rewind.
 - **Seek:** cancel fetches, reset buffer/scheduler, refill from seek chunk.
-- **Join:** 5 ms crossfade between adjacent chunks (follow-up; not yet implemented)
+- **Join:** configurable crossfade between adjacent chunks (default `20` ms via `playback.crossfadeMs`; WSOLA-aligned linear blend in the webview).
 
 ### UI (`player.js`)
 
 - Controls wired to `StreamingAudioEngine` (play, pause, seek, volume).
-- `streamStatus` events for debug panel (index/chunk phase, buffered ranges).
+- Event log: `fetch` and `decode` lines when each chunk finishes; debug grid shows buffer, chunk, and ring state.
 
 ---
 
