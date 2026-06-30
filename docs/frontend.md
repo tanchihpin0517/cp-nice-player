@@ -23,7 +23,7 @@ Stream-only playback — replaces monolithic `load()` + single `AudioBuffer` wit
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | **IndexClient**  | `fetch(\`${serverUrl}/index?audioId=${id})` → manifest with frame-aligned chunk map                                              |
 | **ChunkLoader**  | Fetches chunks in `[playhead, playhead + chunkBufferCount − 1]`; priority queue; abort on seek                                   |
-| **ChunkDecoder** | Per chunk: `decodeAudioData` or WebCodecs (reuse `_decodeWithWebCodecs` logic); output `{ pcm, sampleRate, channels, startSec }` |
+| **ChunkDecoder** | Per chunk: `decodeAudioData` → `AudioBuffer` |
 | **PcmRing**      | Stores decoded float32 per channel for a time window; evicts far-behind playhead                                                 |
 | **Scheduler**    | Drives `AudioContext` output — see [Scheduler options](#scheduler-options) (**production: Option B** via `WorkletScheduler`)                                    |
 
@@ -34,7 +34,7 @@ Two ways to turn decoded PCM into continuous speakers output. **Production playe
 
 #### Option A: Chained `AudioBufferSourceNode` + `nextPlayTime` (reference)
 
-Each decoded chunk is a small `AudioBuffer`. The scheduler chains `AudioBufferSourceNode` instances on a single hardware timeline (`nextPlayTime`), similar to a reference WebCodecs + Web Audio pipeline.
+Each decoded chunk is a small `AudioBuffer`. The scheduler chains `AudioBufferSourceNode` instances on a single hardware timeline (`nextPlayTime`).
 
 ```mermaid
 sequenceDiagram

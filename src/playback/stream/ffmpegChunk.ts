@@ -63,13 +63,11 @@ export interface TranscodeChunkOptions {
 	oggQuality: number;
 }
 
-export async function transcodeChunk(
-	ffmpegPath: string,
+export function buildFfmpegChunkArgs(
 	inputFsPath: string,
 	outputFsPath: string,
 	options: TranscodeChunkOptions,
-	signal?: AbortSignal,
-): Promise<void> {
+): string[] {
 	const { startSec, endSec, format, oggQuality } = options;
 	const baseArgs = [
 		'-y',
@@ -85,9 +83,17 @@ export async function transcodeChunk(
 		inputFsPath,
 		'-vn',
 	];
-	const args =
-		format === 'flac'
-			? [...baseArgs, '-c:a', 'flac', outputFsPath]
-			: [...baseArgs, '-c:a', 'libvorbis', '-q:a', String(oggQuality), outputFsPath];
-	return runFfmpeg(ffmpegPath, args, signal);
+	return format === 'flac'
+		? [...baseArgs, '-c:a', 'flac', outputFsPath]
+		: [...baseArgs, '-c:a', 'libvorbis', '-q:a', String(oggQuality), outputFsPath];
+}
+
+export async function transcodeChunk(
+	ffmpegPath: string,
+	inputFsPath: string,
+	outputFsPath: string,
+	options: TranscodeChunkOptions,
+	signal?: AbortSignal,
+): Promise<void> {
+	return runFfmpeg(ffmpegPath, buildFfmpegChunkArgs(inputFsPath, outputFsPath, options), signal);
 }

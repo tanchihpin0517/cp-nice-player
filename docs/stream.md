@@ -330,7 +330,7 @@ Client-facing manifest has **no** `cacheKey` or source path. Chunk URLs are alwa
 
 Notes:
 
-- `**initRequired: false`** for v1: each chunk is a **self-contained** encoded snippet decodable with `decodeAudioData` / WebCodecs without a shared init segment.
+- `**initRequired: false`** for v1: each chunk is a **self-contained** encoded snippet decodable with `decodeAudioData` without a shared init segment.
 - Optional response headers on chunks: `X-Chunk-Index`, `X-Chunk-Start-Sec`, `X-Chunk-Duration-Sec`.
 
 ### Chunk resource
@@ -631,7 +631,7 @@ From `transcode.ts` → `cache.ts`:
 
 From `audioEngine.js` → `streamingAudioEngine.js`:
 
-- Reuse decode helpers (`_decodeWithWebCodecs`, `_canUseWebCodecs`) where they still apply to **per-chunk** decode
+- Per-chunk decode via `decodeAudioData` only
 - Replace `load(url)` with `load(serverUrl, audioId)` → index + chunk pipeline
 
 #### Unchanged role (not legacy)
@@ -671,7 +671,7 @@ loadMedia(serverUrl, audioId)
 | --- | --- |
 | **IndexClient** | Fetch manifest; chunk map with `startSec` / `endSec` |
 | **ChunkLoader** | Buffer `[playhead … playhead + chunkBufferCount − 1]`; abort on seek |
-| **ChunkDecoder** | `decodeAudioData` or WebCodecs → `AudioBuffer` per chunk |
+| **ChunkDecoder** | `decodeAudioData` → `AudioBuffer` per chunk |
 | **Scheduler** | PCM → continuous output (see below) |
 
 ### Schedulers
@@ -791,7 +791,7 @@ Single pass — ship only when legacy paths are gone.
 | Cache lifetime        | **Session-scoped (server process)**                    | Full `stream/` wipe on server start and stop; reuse only while server runs |
 | Playback buffer       | `**chunkBufferCount`** (default 5)                     | Includes current chunk; playing 10 → hold 10–14                            |
 | Playback              | **Stream only (full refactor)**                        | Delete legacy modules; no dual paths                                       |
-| Chunk encoding        | **Same as today** (ogg/flac)                           | Reuse FFmpeg settings and WebCodecs path                                   |
+| Chunk encoding        | **Same as today** (ogg/flac)                           | Reuse FFmpeg settings; webview decodes with `decodeAudioData`              |
 | Self-contained chunks | **Yes (v1)**                                           | Avoid init-segment complexity in webview                                   |
 | Index transport       | **JSON over HTTP**                                     | Easy to debug in VS Code webview                                           |
 | Probe tool            | **ffprobe**                                            | Accurate duration; falls back to ffmpeg stderr parse                       |

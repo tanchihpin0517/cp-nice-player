@@ -14,6 +14,7 @@ function validManifest() {
 		},
 		chunking: {
 			targetDurationSec: 1,
+			crossfadeMs: 50,
 			count: 2,
 			strategy: 'frame-aligned',
 			chunks: [
@@ -25,6 +26,8 @@ function validManifest() {
 					endByte: 99,
 					startFrame: 0,
 					endFrame: 10,
+					crossfadeEndFrame: 12,
+					crossfadeEndSec: 1.05,
 				},
 				{
 					index: 1,
@@ -34,6 +37,8 @@ function validManifest() {
 					endByte: 199,
 					startFrame: 11,
 					endFrame: 20,
+					crossfadeEndFrame: 20,
+					crossfadeEndSec: 2,
 				},
 			],
 		},

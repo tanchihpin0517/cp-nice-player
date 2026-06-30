@@ -1,5 +1,5 @@
 import * as fs from 'fs/promises';
-import { getChunkDurationSec, getPlaybackFormat } from '../../config';
+import { getChunkDurationSec, getCrossfadeMs, getPlaybackFormat } from '../../config';
 import { FfmpegCheckResult } from '../../ffmpegHost';
 import { inferFrameAlignedChunks, ChunkEntry } from './chunkPlanner';
 import { scanAudioFrames } from './probe';
@@ -22,6 +22,7 @@ export interface StreamIndexManifest {
 	};
 	chunking: {
 		targetDurationSec: number;
+		crossfadeMs: number;
 		count: number;
 		strategy: 'frame-aligned';
 		chunks: ChunkEntry[];
@@ -45,7 +46,11 @@ function isValidChunkEntry(value: unknown, index: number, prev?: ChunkEntry): va
 		!Number.isInteger(entry.startFrame) ||
 		!Number.isInteger(entry.endFrame) ||
 		entry.startFrame < 0 ||
-		entry.endFrame < entry.startFrame
+		entry.endFrame < entry.startFrame ||
+		!Number.isFinite(entry.crossfadeEndSec) ||
+		entry.crossfadeEndSec < entry.endSec ||
+		!Number.isInteger(entry.crossfadeEndFrame) ||
+		entry.crossfadeEndFrame < entry.endFrame
 	) {
 		return false;
 	}
@@ -88,6 +93,8 @@ export function isValidStreamIndexManifest(value: unknown): value is StreamIndex
 		typeof manifest.encode?.contentType === 'string' &&
 		Number.isFinite(manifest.chunking?.targetDurationSec) &&
 		manifest.chunking.targetDurationSec > 0 &&
+		Number.isFinite(manifest.chunking?.crossfadeMs) &&
+		manifest.chunking.crossfadeMs >= 0 &&
 		Number.isInteger(manifest.chunking?.count) &&
 		manifest.chunking.count === chunks.length &&
 		manifest.chunking.strategy === 'frame-aligned'
@@ -99,7 +106,13 @@ function buildManifest(
 ): StreamIndexManifest {
 	const format = getPlaybackFormat();
 	const targetDurationSec = getChunkDurationSec();
-	const chunks = inferFrameAlignedChunks(frameScan.packets, targetDurationSec, frameScan.fileSize);
+	const crossfadeMs = getCrossfadeMs();
+	const chunks = inferFrameAlignedChunks(
+		frameScan.packets,
+		targetDurationSec,
+		frameScan.fileSize,
+		crossfadeMs / 1000,
+	);
 	const outputExt = outputExtForFormat(format);
 
 	return {
@@ -114,6 +127,7 @@ function buildManifest(
 		},
 		chunking: {
 			targetDurationSec,
+			crossfadeMs,
 			count: chunks.length,
 			strategy: 'frame-aligned',
 			chunks,

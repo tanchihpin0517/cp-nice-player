@@ -130,20 +130,18 @@ class WorkletScheduler {
   }
 
   /**
-   * Copy PCM from an AudioBuffer slice into the worklet ring, waiting when full.
+   * Copy planar PCM channel arrays into the worklet ring, waiting when full.
+   * Each channel must have at least frameCount samples.
    * @returns {number} frames written
    */
-  async writePcm(audioBuffer, offsetFrames, frameCount) {
-    let remaining = Math.min(
-      frameCount,
-      audioBuffer.length - offsetFrames,
-    );
+  async writeChannels(channels, frameCount) {
+    let remaining = frameCount;
     if (remaining <= 0) {
       return 0;
     }
 
     let totalWritten = 0;
-    let offset = offsetFrames;
+    let offset = 0;
 
     while (remaining > 0) {
       await this._waitForFreeFrames(1);
@@ -153,15 +151,14 @@ class WorkletScheduler {
         continue;
       }
 
-      const channels = [];
+      const block = [];
       for (let ch = 0; ch < this.channelCount; ch += 1) {
-        const data = audioBuffer.getChannelData(ch);
-        channels.push(data.subarray(offset, offset + chunkFrames));
+        block.push(channels[ch].subarray(offset, offset + chunkFrames));
       }
 
       this.workletNode.port.postMessage({
         type: 'writeBlock',
-        channels,
+        channels: block,
       });
 
       const ack = await this._waitForWriteAck();
@@ -176,6 +173,28 @@ class WorkletScheduler {
     }
 
     return totalWritten;
+  }
+
+  /**
+   * Copy PCM from an AudioBuffer slice into the worklet ring, waiting when full.
+   * @returns {number} frames written
+   */
+  async writePcm(audioBuffer, offsetFrames, frameCount) {
+    const writeFrames = Math.min(
+      frameCount,
+      audioBuffer.length - offsetFrames,
+    );
+    if (writeFrames <= 0) {
+      return 0;
+    }
+
+    const channels = [];
+    for (let ch = 0; ch < this.channelCount; ch += 1) {
+      const data = audioBuffer.getChannelData(ch);
+      channels.push(data.subarray(offsetFrames, offsetFrames + writeFrames));
+    }
+
+    return this.writeChannels(channels, writeFrames);
   }
 
   async play() {

@@ -44,14 +44,15 @@ function chunkKey(cacheDirName: string, index: number): string {
 	return `${cacheDirName}:${index}`;
 }
 
-function chunkTimingFromManifest(
+export function chunkTimingFromManifest(
 	index: number,
 	manifest: StreamIndexManifest,
-): { startSec: number; endSec: number; durationSec: number } {
+): { startSec: number; endSec: number; encodeEndSec: number; durationSec: number } {
 	const chunk = getChunkEntry(manifest, index);
 	return {
 		startSec: chunk.startSec,
 		endSec: chunk.endSec,
+		encodeEndSec: chunk.crossfadeEndSec,
 		durationSec: Math.max(0, chunk.endSec - chunk.startSec),
 	};
 }
@@ -97,9 +98,9 @@ async function generateChunk(
 
 	const format = getPlaybackFormat();
 	const oggQuality = getPlaybackOggQuality();
-	const { startSec, endSec, durationSec } = chunkTimingFromManifest(index, manifest);
+	const { startSec, encodeEndSec, durationSec } = chunkTimingFromManifest(index, manifest);
 
-	if (durationSec <= 0 || endSec <= startSec) {
+	if (durationSec <= 0 || encodeEndSec <= startSec) {
 		throw new ChunkOutOfRangeError(index, manifest.chunking.count);
 	}
 
@@ -117,7 +118,7 @@ async function generateChunk(
 		try {
 			await transcodeChunk(ffmpeg.path, streamCtx.fsPath, tempPath, {
 				startSec,
-				endSec,
+				endSec: encodeEndSec,
 				format,
 				oggQuality,
 			});

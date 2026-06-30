@@ -38,6 +38,82 @@ function formatChunkRanges(indices) {
   return ranges.join(', ');
 }
 
+function audioBufferToPlanar(audioBuffer) {
+  const planar = [];
+  for (let ch = 0; ch < audioBuffer.numberOfChannels; ch += 1) {
+    planar.push(audioBuffer.getChannelData(ch));
+  }
+  return planar;
+}
+
+function buildLinearFade(overlapFrames) {
+  const fadeIn = new Float32Array(overlapFrames);
+  const fadeOut = new Float32Array(overlapFrames);
+  for (let i = 0; i < overlapFrames; i += 1) {
+    const t = (i + 0.5) / overlapFrames;
+    fadeIn[i] = t;
+    fadeOut[i] = 1 - t;
+  }
+  return { fadeIn, fadeOut };
+}
+
+function normalizedCrossCorrelation(tail, head, headStart, blendFrames) {
+  let dot = 0;
+  let tailEnergy = 0;
+  let headEnergy = 0;
+
+  for (let ch = 0; ch < tail.length; ch += 1) {
+    const tailCh = tail[ch];
+    const headCh = head[ch];
+    for (let i = 0; i < blendFrames; i += 1) {
+      const t = tailCh[i];
+      const h = headCh[headStart + i];
+      dot += t * h;
+      tailEnergy += t * t;
+      headEnergy += h * h;
+    }
+  }
+
+  const denom = Math.sqrt(tailEnergy * headEnergy);
+  if (denom <= 1e-12) {
+    return 0;
+  }
+  return dot / denom;
+}
+
+function findWsolaOffset(tail, head, blendFrames, searchRadius, baseOffset = 0) {
+  let bestOffset = 0;
+  let bestScore = -Infinity;
+
+  for (let offset = 0; offset <= searchRadius; offset += 1) {
+    const headStart = baseOffset + offset;
+    if (headStart + blendFrames > head[0].length) {
+      continue;
+    }
+    const score = normalizedCrossCorrelation(tail, head, headStart, blendFrames);
+    if (score > bestScore) {
+      bestScore = score;
+      bestOffset = offset;
+    }
+  }
+
+  return bestOffset;
+}
+
+function linearCrossfade(tail, head, headStart, blendFrames, fadeIn, fadeOut) {
+  const blended = [];
+  for (let ch = 0; ch < tail.length; ch += 1) {
+    const out = new Float32Array(blendFrames);
+    const tailCh = tail[ch];
+    const headCh = head[ch];
+    for (let i = 0; i < blendFrames; i += 1) {
+      out[i] = tailCh[i] * fadeOut[i] + headCh[headStart + i] * fadeIn[i];
+    }
+    blended.push(out);
+  }
+  return blended;
+}
+
 const LOOP_INTERVAL_MS = 200;
 const DECODE_IDLE_MS = 200;
 const INDEX_RETRY_INTERVAL_MS = 1000;
@@ -73,6 +149,7 @@ class StreamingAudioEngine extends EventTarget {
     this._indexRetryTimer = null;
     this._bufferedChunks = '—';
     this._lastWorkletStats = null;
+    this._crossfadeTail = null;
   }
 
   async load(serverUrl, audioId, options = {}) {
@@ -126,6 +203,7 @@ class StreamingAudioEngine extends EventTarget {
 
     if (!resuming) {
       this.scheduler?.reset();
+      this._clearCrossfadeTail();
       this.playbackAnchorCtxTime = this.ctx.currentTime;
     }
 
@@ -172,6 +250,7 @@ class StreamingAudioEngine extends EventTarget {
     this._abortAllFetches();
     this.scheduler?.reset();
     this.decodedChunks.clear();
+    this._clearCrossfadeTail();
     this.pausedAt = clamped;
     this.isPlaying = false;
     this._stopTimeTicker();
@@ -242,6 +321,8 @@ class StreamingAudioEngine extends EventTarget {
       underrunFrames: this.scheduler?.underrunFrames ?? 0,
       manifestStrategy: this.manifest?.chunking?.strategy,
       manifestChunkCount: this.manifest?.chunking?.count,
+      manifestCrossfadeMs: this.manifest?.chunking?.crossfadeMs,
+      crossfadeTailHeld: this._crossfadeTail != null,
       bufferedChunks: this._bufferedChunks,
     };
   }
@@ -262,12 +343,34 @@ class StreamingAudioEngine extends EventTarget {
     this._bufferedChunks = '—';
     this.fetchInFlight.clear();
     this.decodedChunks.clear();
+    this._clearCrossfadeTail();
     this.serverUrl = '';
     this.audioId = '';
     if (this.ctx) {
       await this.ctx.close();
       this.ctx = null;
     }
+  }
+
+  _clearCrossfadeTail() {
+    this._crossfadeTail = null;
+  }
+
+  _chunkOverlapFrames(entry, index) {
+    if (!entry || !this.manifest) {
+      return 0;
+    }
+    const crossfadeMs = this.manifest.chunking?.crossfadeMs ?? 0;
+    if (crossfadeMs <= 0) {
+      return 0;
+    }
+    const isFinal = index >= this.manifest.chunking.count - 1;
+    if (isFinal) {
+      return 0;
+    }
+    const endSec = entry.endSec;
+    const crossfadeEndSec = entry.crossfadeEndSec ?? endSec;
+    return Math.max(0, Math.round((crossfadeEndSec - endSec) * this.manifest.sampleRate));
   }
 
   _ringCapacitySec() {
@@ -373,6 +476,7 @@ class StreamingAudioEngine extends EventTarget {
     this._stopTimeTicker();
     this.scheduler?.reset();
     this.decodedChunks.clear();
+    this._clearCrossfadeTail();
     void this.scheduler?.pause();
     this._emit('ended');
     this._emit('timeupdate', {
@@ -648,19 +752,70 @@ class StreamingAudioEngine extends EventTarget {
       }
 
       const entry = chunkEntry(this.manifest, index);
+      const overlapFrames = this._chunkOverlapFrames(entry, index);
+      const isFinal = index >= this.manifest.chunking.count - 1;
+
       const offsetSec = this.decodedChunks.size === 0
         ? Math.min(
           Math.max(0, this.pausedAt - (entry?.startSec ?? 0)),
           audioBuffer.duration,
         )
         : 0;
-      const offsetFrames = Math.floor(offsetSec * this.manifest.sampleRate);
-      const frameCount = audioBuffer.length - offsetFrames;
-      if (frameCount <= 0) {
+      let start = Math.floor(offsetSec * this.manifest.sampleRate);
+      const frames = audioBuffer.length;
+      if (start >= frames) {
         return null;
       }
 
-      await this.scheduler.writePcm(audioBuffer, offsetFrames, frameCount);
+      const planar = audioBufferToPlanar(audioBuffer);
+      const fade = overlapFrames > 0 ? buildLinearFade(overlapFrames) : null;
+
+      if (this._crossfadeTail && overlapFrames > 0) {
+        const tailLen = this._crossfadeTail[0].length;
+        const blendFrames = Math.min(overlapFrames, frames - start, tailLen);
+        if (blendFrames > 0) {
+          const searchRadius = overlapFrames;
+          const headStart = start + findWsolaOffset(
+            this._crossfadeTail,
+            planar,
+            blendFrames,
+            searchRadius,
+            start,
+          );
+          const blended = linearCrossfade(
+            this._crossfadeTail,
+            planar,
+            headStart,
+            blendFrames,
+            fade.fadeIn,
+            fade.fadeOut,
+          );
+          await this.scheduler.writeChannels(blended, blendFrames);
+          if (generation !== this.loadGeneration) {
+            return null;
+          }
+          start = headStart + blendFrames;
+        }
+        this._crossfadeTail = null;
+      }
+
+      const bodyEnd = isFinal ? frames : Math.max(start, frames - overlapFrames);
+      const bodyFrames = bodyEnd - start;
+      if (bodyFrames > 0) {
+        const bodyChannels = planar.map((ch) => ch.subarray(start, bodyEnd));
+        await this.scheduler.writeChannels(bodyChannels, bodyFrames);
+        if (generation !== this.loadGeneration) {
+          return null;
+        }
+      }
+
+      if (!isFinal && overlapFrames > 0) {
+        const tailStart = Math.max(0, frames - overlapFrames);
+        this._crossfadeTail = planar.map((ch) => ch.slice(tailStart, frames));
+      } else {
+        this._crossfadeTail = null;
+      }
+
       if (generation !== this.loadGeneration) {
         return null;
       }
@@ -699,100 +854,10 @@ class StreamingAudioEngine extends EventTarget {
   }
 
   async _decodeBytes(bytes) {
-    const codec = this.manifest?.encode?.codec || 'unknown';
-    const canUseWebCodecs = await this._canUseWebCodecs(codec);
-    if (canUseWebCodecs) {
-      try {
-        const decoded = await this._decodeWithWebCodecs(bytes, codec);
-        this.decoderType = 'webcodecs';
-        return decoded;
-      } catch (err) {
-        this._emit('decoderwarning', { decoder: 'webcodecs', message: String(err) });
-      }
-    }
-
     const cloned = bytes.slice(0);
     const decoded = await this.ctx.decodeAudioData(cloned);
     this.decoderType = 'decodeAudioData';
     return decoded;
-  }
-
-  async _canUseWebCodecs(codec) {
-    if (!globalThis.AudioDecoder || !globalThis.EncodedAudioChunk || !this.manifest) {
-      return false;
-    }
-    if (!codec || codec === 'unknown' || codec === 'wav' || codec === 'ogg') {
-      return false;
-    }
-    const { channelCount, sampleRate } = this._manifestAudioLayout();
-    try {
-      const result = await AudioDecoder.isConfigSupported({
-        codec,
-        sampleRate,
-        numberOfChannels: channelCount,
-      });
-      return Boolean(result?.supported);
-    } catch {
-      return false;
-    }
-  }
-
-  async _decodeWithWebCodecs(bytes, codec) {
-    const { channelCount, sampleRate } = this._manifestAudioLayout();
-    const frames = [];
-    let decodedSampleRate = 0;
-    let numberOfChannels = 0;
-    let totalFrames = 0;
-
-    const decoder = new AudioDecoder({
-      output: (audioData) => {
-        decodedSampleRate = audioData.sampleRate;
-        numberOfChannels = audioData.numberOfChannels;
-        const channels = [];
-        for (let channelIndex = 0; channelIndex < audioData.numberOfChannels; channelIndex += 1) {
-          const channelData = new Float32Array(audioData.numberOfFrames);
-          audioData.copyTo(channelData, { planeIndex: channelIndex });
-          channels.push(channelData);
-        }
-        frames.push({
-          channels,
-          numberOfFrames: audioData.numberOfFrames,
-        });
-        totalFrames += audioData.numberOfFrames;
-        audioData.close();
-      },
-      error: (error) => {
-        this._emit('decoderwarning', { decoder: 'webcodecs', message: String(error) });
-      },
-    });
-
-    decoder.configure({
-      codec,
-      sampleRate,
-      numberOfChannels: channelCount,
-    });
-
-    decoder.decode(new EncodedAudioChunk({
-      type: 'key',
-      timestamp: 0,
-      data: new Uint8Array(bytes),
-    }));
-    await decoder.flush();
-    decoder.close();
-
-    if (!frames.length || !decodedSampleRate || !numberOfChannels || !totalFrames) {
-      throw new Error('WebCodecs decode produced no frames.');
-    }
-
-    const buffer = this.ctx.createBuffer(numberOfChannels, totalFrames, decodedSampleRate);
-    let offset = 0;
-    for (const frame of frames) {
-      for (let channelIndex = 0; channelIndex < numberOfChannels; channelIndex += 1) {
-        buffer.getChannelData(channelIndex).set(frame.channels[channelIndex], offset);
-      }
-      offset += frame.numberOfFrames;
-    }
-    return buffer;
   }
 
   _openAudioContext(sampleRate) {

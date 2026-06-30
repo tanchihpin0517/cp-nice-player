@@ -23,6 +23,13 @@ export function getChunkDurationSec(): number {
 	return Math.min(10, Math.max(0.5, value));
 }
 
+export function getCrossfadeMs(): number {
+	const value = vscode.workspace
+		.getConfiguration('cp-nice-player')
+		.get<number>('playback.crossfadeMs', 50);
+	return Math.min(500, Math.max(0, Math.round(value)));
+}
+
 export function getChunkBufferCount(): number {
 	const value = vscode.workspace
 		.getConfiguration('cp-nice-player')

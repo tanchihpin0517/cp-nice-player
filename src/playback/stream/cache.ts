@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import {
 	getChunkDurationSec,
+	getCrossfadeMs,
 	getPlaybackFormat,
 	getPlaybackOggQuality,
 	PlaybackFormat,
@@ -55,8 +56,9 @@ export function computeStreamCacheHash(
 	format: PlaybackFormat,
 	oggQuality: number,
 	chunkDurationSec: number,
+	crossfadeMs: number,
 ): string {
-	const payload = `${fsPath}\0${mtimeMs}\0${size}\0${format}\0${oggQuality}\0${chunkDurationSec}`;
+	const payload = `${fsPath}\0${mtimeMs}\0${size}\0${format}\0${oggQuality}\0${chunkDurationSec}\0${crossfadeMs}`;
 	return createHash('sha256').update(payload).digest('hex');
 }
 
@@ -68,6 +70,7 @@ export async function computeCacheDirName(fsPath: string): Promise<string> {
 	const format = getPlaybackFormat();
 	const oggQuality = getPlaybackOggQuality();
 	const chunkDurationSec = getChunkDurationSec();
+	const crossfadeMs = getCrossfadeMs();
 	const hash = computeStreamCacheHash(
 		fsPath,
 		stat.mtimeMs,
@@ -75,6 +78,7 @@ export async function computeCacheDirName(fsPath: string): Promise<string> {
 		format,
 		oggQuality,
 		chunkDurationSec,
+		crossfadeMs,
 	);
 	return `${fileStem}_${sourceExt}_${hash}`;
 }
