@@ -1,7 +1,7 @@
 {
   "name": "cp-nice-player",
   "displayName": "CP's Nice Player",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "tanchihpin0517",
   "preview": true,
   "description": "Stream audio files inside VS Code with chunked, low-latency playback powered by FFmpeg and Web Audio.",

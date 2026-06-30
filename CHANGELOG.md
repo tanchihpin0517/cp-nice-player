@@ -7,20 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-06-30
+
 ### Added
 
+- Setting `cp-nice-player.playback.crossfadeMs` — per-chunk overlap tail length in milliseconds (default `50`, range `0`–`500`) for seamless chunk joins.
+- Backend crossfade tails: non-final chunks encode past `endSec` to the nearest source frame; manifest records `crossfadeEndFrame` / `crossfadeEndSec`.
+- Frontend WSOLA-aligned linear crossfade at chunk seams (held tail blended with the next chunk head before writing PCM).
+- AudioWorklet-based playback via `WorkletScheduler` and a PCM ring buffer (replaces chained `AudioBufferSourceNode` scheduling).
 - Setting `cp-nice-player.playback.debugLogging` to opt into verbose playback server and FFmpeg console logs (default `false`).
-- Unit tests for stream cache helpers, route matching, and stream-index manifest validation.
+- Headless unit tests: `npm test` runs Mocha with a `vscode` stub — no Electron or display required (CI/server-friendly).
+- Unit tests for chunk planner crossfade, transcode routing, stream cache helpers, route matching, and stream-index manifest validation.
 
 ### Changed
 
-- Chunk fetching is always sequential now (one in-flight download at a time) and server-side FFmpeg transcode is serialized to a single process.
+- Chunk decoding uses `decodeAudioData` only in the webview.
+- Chunk fetching is always sequential (one in-flight download at a time) and server-side FFmpeg transcode is serialized to a single process.
 - Playback server startup no longer shows an information toast on every launch.
 - Internal restructure: playback engine moved to `src/playback/stream/`, the webview session split into `src/playerPanel/`, and `src/ffmpeg.ts` renamed to `src/ffmpegHost.ts`.
-- Media assets folders renamed to singular: `media/player/` and `media/engine/`.
+- Media asset folders renamed to singular: `media/player/` and `media/engine/`.
 
 ### Removed
 
+- WebCodecs decode path in the streaming engine.
 - Setting `cp-nice-player.playback.fetchConcurrency` (replaced by always-sequential fetching).
 
 ## [0.1.4] - 2026-06-17
@@ -91,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio only — video tracks in container files are not played.
 - Chunk cache is session-scoped and cleared when the playback server stops or restarts.
 
+[0.1.5]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.5
 [0.1.4]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.4
 [0.1.3]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.3
 [0.1.2]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.2

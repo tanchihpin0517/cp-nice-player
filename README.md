@@ -8,6 +8,7 @@ Instead of transcoding an entire file before play starts, CP's Nice Player scans
 
 - **Chunked streaming** — Audio starts after the first segment is ready, not after a full-file transcode.
 - **Responsive seeking** — Scrub to any position; only the chunks you need are fetched and decoded.
+- **Seamless chunk joins** — WSOLA-aligned linear crossfade blends overlap tails at chunk boundaries (configurable via `playback.crossfadeMs`).
 - **Bounded memory** — The webview keeps a configurable window of decoded PCM, not the whole track.
 - **Broad format support** — MP3, WAV, OGG, Opus, FLAC, M4A, AAC, WebM, MP4, and MKV containers open in the custom editor (audio tracks only).
 - **Remote development** — Playback works over Remote SSH, Dev Containers, WSL, and Codespaces via VS Code port forwarding.
@@ -49,8 +50,9 @@ When you open a track:
 2. It resolves the server address with `vscode.env.asExternalUri`, which triggers VS Code **port forwarding** when the UI and server are not on the same host (Remote SSH, Dev Containers, WSL, Codespaces, etc.). The webview receives that external URI and fetches chunks through the forwarded port.
 3. The server scans audio frames and builds an index of ~1 s, frame-aligned chunks.
 4. The player fetches the index, then requests chunks around the playhead.
-5. Each chunk is decoded to PCM in the webview and scheduled through Web Audio.
-6. On seek, in-flight fetches are cancelled and buffering reprioritizes around the new position.
+5. Each chunk is decoded to PCM in the webview and written into an AudioWorklet ring buffer for continuous playback.
+6. At chunk seams, a WSOLA-aligned linear crossfade blends the overlap tail of one chunk with the head of the next.
+7. On seek, in-flight fetches are cancelled and buffering reprioritizes around the new position.
 
 Cached chunks live under the extension's global storage and are cleared when the playback server stops or restarts.
 
@@ -62,6 +64,7 @@ Cached chunks live under the extension's global storage and are cleared when the
 | `cp-nice-player.playback.format` | `ogg` | Output format for streamed chunks: `ogg` (smaller, faster) or `flac` (lossless). |
 | `cp-nice-player.playback.oggQuality` | `6` | libvorbis quality (`0`–`10`) when format is `ogg`. Higher is better quality and larger chunks. |
 | `cp-nice-player.playback.chunkDurationSec` | `1` | Target duration of each streamed chunk in seconds (`0.5`–`10`). |
+| `cp-nice-player.playback.crossfadeMs` | `50` | Per-chunk overlap tail length in milliseconds (`0`–`500`). Non-final chunks encode a short tail past the body boundary; the player crossfades it with the next chunk. Set to `0` to disable crossfade. |
 | `cp-nice-player.playback.chunkBufferCount` | `5` | Number of chunks to buffer ahead of the playhead, including the current chunk. At 1 s chunks, `5` ≈ 5 s of buffered audio. |
 | `cp-nice-player.playback.debugLogging` | `false` | Log per-request playback server activity and FFmpeg commands to the extension host console. |
 
@@ -72,6 +75,10 @@ Cached chunks live under the extension's global storage and are cleared when the
 - **Session cache** — Chunk cache is wiped when the playback server stops or VS Code reloads the extension.
 
 ## Release notes
+
+### 0.1.5
+
+Chunk-boundary crossfade: configurable `playback.crossfadeMs`, backend frame-aligned overlap tails, and frontend WSOLA-aligned linear blending. Playback now uses an AudioWorklet PCM scheduler. `npm test` runs headless (no Electron). WebCodecs decode path removed; chunks decode via `decodeAudioData` only.
 
 ### 0.1.4
 
