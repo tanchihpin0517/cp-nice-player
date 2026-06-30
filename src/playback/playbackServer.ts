@@ -1,6 +1,8 @@
 import * as http from 'http';
 import * as vscode from 'vscode';
-import { FfmpegCheckResult } from '../ffmpegHost';
+import { getDebugLogging, getPlaybackFormat, getPlaybackOggQuality } from '../config';
+import { checkFfmpegAvailable, FfmpegCheckResult } from '../ffmpegHost';
+import { formatFfmpegChunkCommandTemplate } from './stream/ffmpegChunk';
 import { cleanStreamCacheDir } from './stream/cache';
 import { registerAudio as registerStreamAudio, RegisterResult } from './stream/registrar';
 import { Registry } from './stream/registry';
@@ -103,6 +105,15 @@ export class PlaybackServer implements vscode.Disposable {
 				console.log(
 					`cp-nice-player: Playback server started on ${this.externalUrl}.`,
 				);
+				if (getDebugLogging()) {
+					const ffmpeg = await checkFfmpegAvailable();
+					console.log(
+						`cp-nice-player: chunk transcode template: ${formatFfmpegChunkCommandTemplate(ffmpeg.path, {
+							format: getPlaybackFormat(),
+							oggQuality: getPlaybackOggQuality(),
+						})}`,
+					);
+				}
 				resolve(this.port);
 			});
 		});

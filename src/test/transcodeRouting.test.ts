@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { chunkTimingFromManifest } from '../playback/stream/chunk';
-import { buildFfmpegChunkArgs } from '../playback/stream/ffmpegChunk';
+import { buildFfmpegChunkArgs, formatFfmpegChunkCommandTemplate } from '../playback/stream/ffmpegChunk';
 import { StreamIndexManifest } from '../playback/stream/indexBuilder';
 
 function fixtureManifest(): StreamIndexManifest {
@@ -98,5 +98,19 @@ suite('Transcode routing', () => {
 		assert.ok(args.includes('-c:a'));
 		assert.ok(args.includes('flac'));
 		assert.strictEqual(args[args.indexOf('-to') + 1], '2');
+	});
+
+	test('formatFfmpegChunkCommandTemplate uses placeholders for per-chunk values', () => {
+		const template = formatFfmpegChunkCommandTemplate('/usr/bin/ffmpeg', {
+			format: 'ogg',
+			oggQuality: 6,
+		});
+
+		assert.ok(template.startsWith('/usr/bin/ffmpeg '));
+		assert.ok(template.includes('{input}'));
+		assert.ok(template.includes('{output}'));
+		assert.ok(template.includes('{startSec}'));
+		assert.ok(template.includes('{endSec}'));
+		assert.ok(template.includes('-q:a 6'));
 	});
 });

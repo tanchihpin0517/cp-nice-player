@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { getDebugLogging, PlaybackFormat } from '../../config';
+import { PlaybackFormat } from '../../config';
 
 function shellQuoteArg(arg: string): string {
 	if (/^[A-Za-z0-9_./:=+-]+$/.test(arg)) {
@@ -8,7 +8,7 @@ function shellQuoteArg(arg: string): string {
 	return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-function formatFfmpegCommand(ffmpegPath: string, args: string[]): string {
+export function formatFfmpegCommand(ffmpegPath: string, args: string[]): string {
 	return [ffmpegPath, ...args.map(shellQuoteArg)].join(' ');
 }
 
@@ -17,9 +17,6 @@ function runFfmpeg(
 	args: string[],
 	signal?: AbortSignal,
 ): Promise<void> {
-	if (getDebugLogging()) {
-		console.log(`cp-nice-player: ${formatFfmpegCommand(ffmpegPath, args)}`);
-	}
 	return new Promise((resolve, reject) => {
 		const proc = spawn(ffmpegPath, args);
 		let stderr = '';
@@ -57,8 +54,8 @@ function runFfmpeg(
 }
 
 export interface TranscodeChunkOptions {
-	startSec: number;
-	endSec: number;
+	startSec: number | string;
+	endSec: number | string;
 	format: PlaybackFormat;
 	oggQuality: number;
 }
@@ -86,6 +83,19 @@ export function buildFfmpegChunkArgs(
 	return format === 'flac'
 		? [...baseArgs, '-c:a', 'flac', outputFsPath]
 		: [...baseArgs, '-c:a', 'libvorbis', '-q:a', String(oggQuality), outputFsPath];
+}
+
+export function formatFfmpegChunkCommandTemplate(
+	ffmpegPath: string,
+	options: Pick<TranscodeChunkOptions, 'format' | 'oggQuality'>,
+): string {
+	const args = buildFfmpegChunkArgs('{input}', '{output}', {
+		startSec: '{startSec}',
+		endSec: '{endSec}',
+		format: options.format,
+		oggQuality: options.oggQuality,
+	});
+	return formatFfmpegCommand(ffmpegPath, args);
 }
 
 export async function transcodeChunk(

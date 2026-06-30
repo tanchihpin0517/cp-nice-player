@@ -64,7 +64,7 @@ Cached chunks live under the extension's global storage and are cleared when the
 | `cp-nice-player.playback.format` | `ogg` | Output format for streamed chunks: `ogg` (smaller, faster) or `flac` (lossless). |
 | `cp-nice-player.playback.oggQuality` | `6` | libvorbis quality (`0`–`10`) when format is `ogg`. Higher is better quality and larger chunks. |
 | `cp-nice-player.playback.chunkDurationSec` | `1` | Target duration of each streamed chunk in seconds (`0.5`–`10`). |
-| `cp-nice-player.playback.crossfadeMs` | `50` | Per-chunk overlap tail length in milliseconds (`0`–`500`). Non-final chunks encode a short tail past the body boundary; the player crossfades it with the next chunk. Set to `0` to disable crossfade. |
+| `cp-nice-player.playback.crossfadeMs` | `20` | Per-chunk overlap tail length in milliseconds (`0`–`500`). Non-final chunks encode a short tail past the body boundary; the player crossfades it with the next chunk. Set to `0` to disable crossfade. |
 | `cp-nice-player.playback.chunkBufferCount` | `5` | Number of chunks to buffer ahead of the playhead, including the current chunk. At 1 s chunks, `5` ≈ 5 s of buffered audio. |
 | `cp-nice-player.playback.debugLogging` | `false` | Log per-request playback server activity and FFmpeg commands to the extension host console. |
 

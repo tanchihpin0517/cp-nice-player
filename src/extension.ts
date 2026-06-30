@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { logPlaybackSettings } from './config';
 import {
 	clearFfmpegCache,
 	FFMPEG_MISSING_NOTIFIED_KEY,
@@ -9,6 +10,8 @@ import { isSupportedAudio, MEDIA_FILE_FILTERS } from './mediaTypes';
 import { PlaybackService } from './playback/playbackService';
 
 export async function activate(context: vscode.ExtensionContext) {
+	logPlaybackSettings();
+
 	const configChange = vscode.workspace.onDidChangeConfiguration((event) => {
 		if (event.affectsConfiguration('cp-nice-player.ffmpegPath')) {
 			void context.globalState.update(FFMPEG_MISSING_NOTIFIED_KEY, undefined);

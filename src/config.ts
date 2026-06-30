@@ -26,7 +26,7 @@ export function getChunkDurationSec(): number {
 export function getCrossfadeMs(): number {
 	const value = vscode.workspace
 		.getConfiguration('cp-nice-player')
-		.get<number>('playback.crossfadeMs', 50);
+		.get<number>('playback.crossfadeMs', 20);
 	return Math.min(500, Math.max(0, Math.round(value)));
 }
 
@@ -41,4 +41,26 @@ export function getDebugLogging(): boolean {
 	return vscode.workspace
 		.getConfiguration('cp-nice-player')
 		.get<boolean>('playback.debugLogging', false);
+}
+
+export function logPlaybackSettings(): void {
+	if (!getDebugLogging()) {
+		return;
+	}
+
+	const configuredFfmpeg = vscode.workspace
+		.getConfiguration('cp-nice-player')
+		.get<string>('ffmpegPath')
+		?.trim();
+
+	console.log(
+		'cp-nice-player: playback settings: '
+			+ `ffmpegPath=${configuredFfmpeg ?? 'ffmpeg (PATH)'}, `
+			+ `format=${getPlaybackFormat()}, `
+			+ `oggQuality=${getPlaybackOggQuality()}, `
+			+ `chunkDurationSec=${getChunkDurationSec()}, `
+			+ `crossfadeMs=${getCrossfadeMs()}, `
+			+ `chunkBufferCount=${getChunkBufferCount()}, `
+			+ `debugLogging=${getDebugLogging()}`,
+	);
 }

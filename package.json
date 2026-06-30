@@ -82,7 +82,7 @@
         },
         "cp-nice-player.playback.crossfadeMs": {
           "type": "number",
-          "default": 50,
+          "default": 20,
           "minimum": 0,
           "maximum": 500,
           "description": "Per-chunk crossfade/overlap tail length in milliseconds."

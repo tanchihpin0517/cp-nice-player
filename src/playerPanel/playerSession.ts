@@ -43,7 +43,7 @@ export class WebviewPlayerSession implements PlayerSession {
 				this.currentFfmpeg &&
 				this.currentAudioId
 			) {
-				this.postMedia(this.currentMedia, this.currentFfmpeg, this.currentAudioId);
+				this.postMedia(this.currentMedia, this.currentAudioId);
 			}
 		}, undefined, this.disposables);
 	}
