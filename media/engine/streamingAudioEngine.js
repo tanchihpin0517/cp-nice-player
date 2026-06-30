@@ -142,7 +142,6 @@ class StreamingAudioEngine extends EventTarget {
     this.isPlaying = false;
     this.volume = 1;
     this.muted = false;
-    this.decoderType = 'none';
     this._fetchTimer = null;
     this._decodeIdleTimer = null;
     this._timeTicker = null;
@@ -162,7 +161,6 @@ class StreamingAudioEngine extends EventTarget {
     this.chunkBufferCount = Math.max(1, Number(options.chunkBufferCount) || 5);
     this.chunkDurationSec = Math.max(0.5, Number(options.chunkDurationSec) || 1);
     this.pausedAt = 0;
-    this.decoderType = 'none';
 
     this._emit('loading', { serverUrl, audioId });
 
@@ -178,10 +176,8 @@ class StreamingAudioEngine extends EventTarget {
     if (generation !== this.loadGeneration) {
       return;
     }
-    this._emitStreamStatus('index', 'ready', { count: manifest.chunking.count });
     this._emit('ready', {
       duration: manifest.durationSec,
-      decoderType: this.decoderType,
       manifest,
     });
     this._emit('timeupdate', {
@@ -294,8 +290,6 @@ class StreamingAudioEngine extends EventTarget {
     const fetchInFlight = [...this.fetchInFlight.keys()].sort((a, b) => a - b);
     const currentChunk = this.manifest ? chunkIndexForTime(this.manifest, this.getCurrentTime()) : 0;
     return {
-      mode: 'streaming',
-      scheduler: this.scheduler ? 'worklet' : '—',
       contextState: this.manifest ? this.ctx.state : 'uninitialized',
       contextSampleRate: this.ctx?.sampleRate ?? 0,
       sampleRate: this.manifest?.sampleRate ?? 0,
@@ -306,20 +300,16 @@ class StreamingAudioEngine extends EventTarget {
       paused: !this.isPlaying,
       muted: this.muted,
       volume: this.volume,
-      decoderType: this.decoderType,
       mediaName: this.mediaName,
       serverUrl: this.serverUrl,
       audioId: this.audioId,
       chunkBufferCount: this.chunkBufferCount,
       currentChunkIndex: currentChunk,
       fetchInFlight: formatChunkRanges(fetchInFlight),
-      fetchLoopActive: this._fetchTimer != null,
-      decodeLoopActive: this.manifest != null,
       decodedChunks: formatChunkRanges([...this.decodedChunks].sort((a, b) => a - b)),
       ringFramesAvailable: this.scheduler?.framesAvailable ?? 0,
       ringFreeFrames: this.scheduler?.freeFrames ?? 0,
       underrunFrames: this.scheduler?.underrunFrames ?? 0,
-      manifestStrategy: this.manifest?.chunking?.strategy,
       manifestChunkCount: this.manifest?.chunking?.count,
       manifestCrossfadeMs: this.manifest?.chunking?.crossfadeMs,
       crossfadeTailHeld: this._crossfadeTail != null,
@@ -493,7 +483,6 @@ class StreamingAudioEngine extends EventTarget {
 
   async _fetchIndexLoop(generation) {
     while (generation === this.loadGeneration) {
-      this._emitStreamStatus('index', 'started');
       try {
         const manifest = await this._fetchIndex(generation);
         if (generation !== this.loadGeneration) {
@@ -505,7 +494,6 @@ class StreamingAudioEngine extends EventTarget {
           return null;
         }
         const message = error instanceof Error ? error.message : String(error);
-        this._emitStreamStatus('index', 'failed', { detail: message });
         this._emit('error', { message });
         await this._waitIndexRetry();
       }
@@ -534,7 +522,6 @@ class StreamingAudioEngine extends EventTarget {
     this._abortIndexFetch();
     this.indexFetchAbort = new AbortController();
     const url = this._streamUrl('/index');
-    this._emit('debug', { message: 'fetching index from ' + url });
     const response = await fetch(url, {
       signal: this.indexFetchAbort.signal,
     });
@@ -678,7 +665,6 @@ class StreamingAudioEngine extends EventTarget {
     }
 
     const task = (async () => {
-      this._emitStreamStatus('chunk', 'started', { chunkIndex: index });
       const controller = new AbortController();
       this.fetchAbortControllers.set(index, controller);
 
@@ -701,9 +687,8 @@ class StreamingAudioEngine extends EventTarget {
 
         this.encodedChunks.set(index, bytes);
         this._updateBufferingState();
-        this._emitStreamStatus('chunk', 'fetched', {
+        this._emitStreamStatus('chunk', 'finished', {
           chunkIndex: index,
-          cache: response.headers.get('X-Cache') || 'unknown',
           bytes: bytes.byteLength,
         });
         return bytes;
@@ -728,9 +713,8 @@ class StreamingAudioEngine extends EventTarget {
       return null;
     }
 
-    this._emitStreamStatus('decode', 'started', { chunkIndex: index });
-
     try {
+      const decodeStart = performance.now();
       const audioBuffer = await this._decodeBytes(bytes);
       if (generation !== this.loadGeneration) {
         return null;
@@ -821,7 +805,8 @@ class StreamingAudioEngine extends EventTarget {
       }
 
       this.decodedChunks.add(index);
-      this._emitStreamStatus('decode', 'ready', { chunkIndex: index });
+      const elapsedMs = performance.now() - decodeStart;
+      this._emitStreamStatus('decode', 'finished', { chunkIndex: index, elapsedMs });
       this._checkPlaybackEnded();
 
       return index;
@@ -855,20 +840,11 @@ class StreamingAudioEngine extends EventTarget {
 
   async _decodeBytes(bytes) {
     const cloned = bytes.slice(0);
-    const decoded = await this.ctx.decodeAudioData(cloned);
-    this.decoderType = 'decodeAudioData';
-    return decoded;
+    return this.ctx.decodeAudioData(cloned);
   }
 
   _openAudioContext(sampleRate) {
     this.ctx = new AudioContext({ sampleRate });
-    if (this.ctx.sampleRate !== sampleRate) {
-      this._emit('decoderwarning', {
-        message: 'AudioContext sample rate is '
-          + this.ctx.sampleRate + ' Hz (requested ' + sampleRate + ' Hz); '
-          + 'decodeAudioData may resample chunks',
-      });
-    }
   }
 
   _syncGain() {

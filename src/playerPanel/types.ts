@@ -13,12 +13,6 @@ export interface LoadMediaMessage {
 		playbackOggQuality: number;
 		chunkDurationSec: number;
 		chunkBufferCount: number;
-		ffmpeg: {
-			available: boolean;
-			path: string;
-			version?: string;
-			error?: string;
-		};
 	};
 }
 

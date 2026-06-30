@@ -104,7 +104,7 @@ export class WebviewPlayerSession implements PlayerSession {
 			}
 
 			this.currentAudioId = audioId;
-			this.postMedia(mediaUri, ffmpeg, audioId);
+			this.postMedia(mediaUri, audioId);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			void vscode.window.showErrorMessage(`CP's Nice Player: ${message}`);
@@ -113,7 +113,6 @@ export class WebviewPlayerSession implements PlayerSession {
 
 	private postMedia(
 		mediaUri: vscode.Uri,
-		ffmpeg: FfmpegCheckResult,
 		audioId: string,
 	): void {
 		if (!isSupportedAudio(mediaUri)) {
@@ -137,12 +136,6 @@ export class WebviewPlayerSession implements PlayerSession {
 				playbackOggQuality: getPlaybackOggQuality(),
 				chunkDurationSec: getChunkDurationSec(),
 				chunkBufferCount: getChunkBufferCount(),
-				ffmpeg: {
-					available: ffmpeg.available,
-					path: ffmpeg.path,
-					version: ffmpeg.version,
-					error: ffmpeg.error,
-				},
 			},
 		};
 

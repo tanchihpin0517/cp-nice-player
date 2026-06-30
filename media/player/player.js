@@ -27,6 +27,30 @@ function formatTime(seconds) {
   return mins + ':' + String(secs).padStart(2, '0');
 }
 
+function formatChunkBytes(bytes) {
+  if (bytes < 1024) {
+    return bytes + 'B';
+  }
+  if (bytes < 1024 * 1024) {
+    return (bytes / 1024).toFixed(1) + 'KB';
+  }
+  return (bytes / (1024 * 1024)).toFixed(1) + 'MB';
+}
+
+function formatAudioLayout(diag) {
+  const channels = diag.manifestChannels;
+  const manifestRate = diag.manifestSampleRate;
+  const contextRate = diag.contextSampleRate;
+  if (!channels || !manifestRate) {
+    return '—';
+  }
+  let layout = channels + 'ch @ ' + manifestRate + ' Hz';
+  if (contextRate && contextRate !== manifestRate) {
+    layout += ' (ctx ' + contextRate + ' Hz)';
+  }
+  return layout;
+}
+
 function escapeHtml(str) {
   return String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -77,26 +101,16 @@ function updateDebugPanel() {
   const diag = engine.getDiagnostics();
 
   const fields = [
-    renderDebugField('Mode', 'Streaming playback'),
-    renderDebugField('File', debugContext.name),
     renderDebugField('Path', debugContext.debug.fsPath),
     renderDebugField('serverUrl', debugContext.serverUrl),
     renderDebugField('audioId', debugContext.audioId),
     renderDebugField('playbackFormat', debugContext.debug.playbackFormat),
     renderDebugField('chunkBufferCount', String(debugContext.debug.chunkBufferCount)),
-    renderDebugField('ffmpeg', debugContext.debug.ffmpeg?.available ? 'available' : 'missing'),
-    renderDebugField('decoder', diag.decoderType),
     renderDebugField('context', diag.contextState),
-    renderDebugField('index.strategy', diag.manifestStrategy ?? '—'),
     renderDebugField('index.chunkCount', diag.manifestChunkCount != null ? String(diag.manifestChunkCount) : '—'),
-    renderDebugField('channels', diag.manifestChannels != null ? String(diag.manifestChannels) : '—'),
-    renderDebugField('sampleRate', diag.manifestSampleRate != null ? String(diag.manifestSampleRate) : '—'),
-    renderDebugField('context sampleRate', diag.contextSampleRate != null ? String(diag.contextSampleRate) : '—'),
+    renderDebugField('audio', formatAudioLayout(diag)),
     renderDebugField('currentChunk', String(diag.currentChunkIndex)),
-    renderDebugField('fetch loop', diag.fetchLoopActive ? 'active' : 'stopped'),
-    renderDebugField('decode loop', diag.decodeLoopActive ? 'active' : 'stopped'),
     renderDebugField('buffered chunks', diag.bufferedChunks),
-    renderDebugField('scheduler', diag.scheduler ?? '—'),
     renderDebugField('ring buffered', diag.ringFramesAvailable != null
       ? `${diag.ringFramesAvailable} frames (${diag.ringFreeFrames} free)`
       : '—'),
@@ -232,11 +246,6 @@ function bindEngineEvents() {
     updateDebugPanel();
   });
 
-  engine.addEventListener('debug', (event) => {
-    logEvent('debug', event.detail.message);
-    updateDebugPanel();
-  });
-
   engine.addEventListener('ended', () => {
     setPlayButtonLabel(false);
     trackState.textContent = 'Ended';
@@ -249,18 +258,18 @@ function bindEngineEvents() {
   });
 
   engine.addEventListener('streamstatus', (event) => {
-    const { phase, status, chunkIndex, cache, bytes } = event.detail;
-    let detail = status;
-    if (chunkIndex != null) {
-      detail += ' chunk=' + chunkIndex;
+    const { phase, status, chunkIndex, bytes, elapsedMs } = event.detail;
+    if (phase === 'decode' && status === 'finished') {
+      const ms = elapsedMs.toFixed(1);
+      const pct = (elapsedMs / 10).toFixed(1);
+      logEvent(phase, 'chunk=' + chunkIndex + ' time=' + ms + 'ms(' + pct + '%)');
+    } else if (phase === 'chunk' && status === 'finished') {
+      let fetchDetail = 'chunk=' + chunkIndex;
+      if (bytes != null) {
+        fetchDetail += ' bytes=' + formatChunkBytes(bytes);
+      }
+      logEvent('fetch', fetchDetail);
     }
-    if (cache) {
-      detail += ' cache=' + cache;
-    }
-    if (bytes != null) {
-      detail += ' bytes=' + bytes;
-    }
-    logEvent(phase, detail);
     updateDebugPanel();
   });
 
