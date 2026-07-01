@@ -457,7 +457,7 @@ Each chunk is a **short encoded file** (complete Ogg/FLAC stream for that time r
 ### UI integration (`player.js`)
 
 - `loadMedia` provides `serverUrl` + `audioId`; all fetches append `?audioId=${audioId}`
-- `streamStatus` messages: `decode` and `chunk` phases emit `finished` only (with `elapsedMs` or `bytes`); the event log formats them as `decode chunk=N time=<ms>ms(<pct>%)` and `fetch chunk=N bytes=<size>`.
+- `chunkfinished` and `decodefinished` events (with `bytes` or `elapsedMs` / `wsolaShiftSamples`); the event log formats them as `fetch chunk=N bytes=<size>` and `decode chunk=N time=<ms>ms(<pct>%) wsola=<ms>ms(<samples>)`.
 - Debug panel: playback path, buffer/chunk state, ring stats, and a combined `audio` layout row (`Nch @ rate Hz`).
 
 ### Playback state machine

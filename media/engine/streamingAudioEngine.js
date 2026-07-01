@@ -687,7 +687,7 @@ class StreamingAudioEngine extends EventTarget {
 
         this.encodedChunks.set(index, bytes);
         this._updateBufferingState();
-        this._emitStreamStatus('chunk', 'finished', {
+        this._emit('chunkfinished', {
           chunkIndex: index,
           bytes: bytes.byteLength,
         });
@@ -753,19 +753,21 @@ class StreamingAudioEngine extends EventTarget {
 
       const planar = audioBufferToPlanar(audioBuffer);
       const fade = overlapFrames > 0 ? buildLinearFade(overlapFrames) : null;
+      let wsolaShiftSamples = null;
 
       if (this._crossfadeTail && overlapFrames > 0) {
         const tailLen = this._crossfadeTail[0].length;
         const blendFrames = Math.min(overlapFrames, frames - start, tailLen);
         if (blendFrames > 0) {
           const searchRadius = overlapFrames;
-          const headStart = start + findWsolaOffset(
+          wsolaShiftSamples = findWsolaOffset(
             this._crossfadeTail,
             planar,
             blendFrames,
             searchRadius,
             start,
           );
+          const headStart = start + wsolaShiftSamples;
           const blended = linearCrossfade(
             this._crossfadeTail,
             planar,
@@ -806,7 +808,11 @@ class StreamingAudioEngine extends EventTarget {
 
       this.decodedChunks.add(index);
       const elapsedMs = performance.now() - decodeStart;
-      this._emitStreamStatus('decode', 'finished', { chunkIndex: index, elapsedMs });
+      this._emit('decodefinished', {
+        chunkIndex: index,
+        elapsedMs,
+        wsolaShiftSamples,
+      });
       this._checkPlaybackEnded();
 
       return index;
@@ -902,10 +908,6 @@ class StreamingAudioEngine extends EventTarget {
 
   _emit(type, detail = {}) {
     this.dispatchEvent(new CustomEvent(type, { detail }));
-  }
-
-  _emitStreamStatus(phase, status, extra = {}) {
-    this._emit('streamstatus', { phase, status, ...extra });
   }
 }
 

@@ -51,6 +51,14 @@ function formatAudioLayout(diag) {
   return layout;
 }
 
+function formatWsolaShift(samples, sampleRate) {
+  if (samples == null || !sampleRate) {
+    return '—';
+  }
+  const ms = (samples / sampleRate) * 1000;
+  return ms.toFixed(1) + 'ms(' + samples + ')';
+}
+
 function escapeHtml(str) {
   return String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -257,19 +265,22 @@ function bindEngineEvents() {
     updateDebugPanel();
   });
 
-  engine.addEventListener('streamstatus', (event) => {
-    const { phase, status, chunkIndex, bytes, elapsedMs } = event.detail;
-    if (phase === 'decode' && status === 'finished') {
-      const ms = elapsedMs.toFixed(1);
-      const pct = (elapsedMs / 10).toFixed(1);
-      logEvent(phase, 'chunk=' + chunkIndex + ' time=' + ms + 'ms(' + pct + '%)');
-    } else if (phase === 'chunk' && status === 'finished') {
-      let fetchDetail = 'chunk=' + chunkIndex;
-      if (bytes != null) {
-        fetchDetail += ' bytes=' + formatChunkBytes(bytes);
-      }
-      logEvent('fetch', fetchDetail);
+  engine.addEventListener('chunkfinished', (event) => {
+    const { chunkIndex, bytes } = event.detail;
+    let detail = 'chunk=' + chunkIndex;
+    if (bytes != null) {
+      detail += ' bytes=' + formatChunkBytes(bytes);
     }
+    logEvent('fetch', detail);
+    updateDebugPanel();
+  });
+
+  engine.addEventListener('decodefinished', (event) => {
+    const { chunkIndex, elapsedMs, wsolaShiftSamples } = event.detail;
+    const ms = elapsedMs.toFixed(1);
+    const pct = (elapsedMs / 10).toFixed(1);
+    const wsola = formatWsolaShift(wsolaShiftSamples, engine.getDiagnostics().manifestSampleRate);
+    logEvent('decode', 'chunk=' + chunkIndex + ' time=' + ms + 'ms(' + pct + '%) wsola=' + wsola);
     updateDebugPanel();
   });
 
