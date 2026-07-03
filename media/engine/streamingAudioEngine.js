@@ -586,31 +586,32 @@ class StreamingAudioEngine extends EventTarget {
       return;
     }
 
-    const { targetEnd } = this._getBufferWindow();
+    const { currentChunk, targetEnd } = this._getBufferWindow();
     const first = this._nextChunkToSchedule();
     if (first == null) {
       return;
     }
 
-    const { pending, ready } = this._countEncodableChunks(first, targetEnd);
+    // Only decode up to the chunk immediately after the current playing chunk.
+    const decodeEnd = Math.min(currentChunk + 1, targetEnd);
+    if (first > decodeEnd) {
+      return;
+    }
+
+    const { pending, ready } = this._countEncodableChunks(first, decodeEnd);
     const required = Math.min(2, pending);
     if (ready < required) {
       return;
     }
 
-    for (let index = first; index <= targetEnd; index += 1) {
-      if (generation !== this.loadGeneration) {
-        break;
-      }
-      if (this.decodedChunks.has(index)) {
-        continue;
-      }
-      if (!this.encodedChunks.has(index)) {
-        continue;
-      }
-
-      await this._decodeAndWriteChunk(index, generation);
+    if (generation !== this.loadGeneration) {
+      return;
     }
+    if (this.decodedChunks.has(first) || !this.encodedChunks.has(first)) {
+      return;
+    }
+
+    await this._decodeAndWriteChunk(first, generation);
   }
 
   async _runDecodeIteration(generation) {
