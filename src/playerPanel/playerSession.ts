@@ -4,14 +4,28 @@ import * as vscode from 'vscode';
 import {
 	getChunkBufferCount,
 	getChunkDurationSec,
-	getPlaybackFormat,
 	getPlaybackOggQuality,
 } from '../config';
-import { FfmpegCheckResult } from '../ffmpegHost';
+import { EncodeFormat } from '../encodeFormat';
+import { FfmpegCheckResult, getEffectiveEncodeFormat } from '../ffmpegHost';
 import { isSupportedAudio } from '../mediaTypes';
 import { getStreamCacheDir } from '../playback/stream/cache';
 import { PlaybackService } from '../playback/playbackService';
-import { LoadMediaMessage, PlayerSession } from './types';
+import { PlayerSession } from './types';
+
+interface LoadMediaMessage {
+	type: 'loadMedia';
+	name: string;
+	serverUrl: string;
+	audioId: string;
+	debug: {
+		fsPath: string;
+		playbackFormat: EncodeFormat;
+		playbackOggQuality: number;
+		chunkDurationSec: number;
+		chunkBufferCount: number;
+	};
+}
 
 export class WebviewPlayerSession implements PlayerSession {
 	private readonly panel: vscode.WebviewPanel;
@@ -132,7 +146,7 @@ export class WebviewPlayerSession implements PlayerSession {
 			audioId,
 			debug: {
 				fsPath: mediaUri.fsPath,
-				playbackFormat: getPlaybackFormat(),
+				playbackFormat: getEffectiveEncodeFormat(),
 				playbackOggQuality: getPlaybackOggQuality(),
 				chunkDurationSec: getChunkDurationSec(),
 				chunkBufferCount: getChunkBufferCount(),

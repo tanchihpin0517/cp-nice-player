@@ -3,6 +3,7 @@ import { logPlaybackSettings } from './config';
 import {
 	clearFfmpegCache,
 	FFMPEG_MISSING_NOTIFIED_KEY,
+	refreshEncodeFormatResolution,
 	warmFfmpegAndNotifyOnce,
 } from './ffmpegHost';
 import { MEDIA_EDITOR_VIEW_TYPE, MediaEditorProvider } from './mediaEditorProvider';
@@ -16,6 +17,11 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (event.affectsConfiguration('cp-nice-player.ffmpegPath')) {
 			void context.globalState.update(FFMPEG_MISSING_NOTIFIED_KEY, undefined);
 			void clearFfmpegCache(context);
+			return;
+		}
+
+		if (event.affectsConfiguration('cp-nice-player.playback.format')) {
+			refreshEncodeFormatResolution();
 		}
 	});
 	context.subscriptions.push(configChange);

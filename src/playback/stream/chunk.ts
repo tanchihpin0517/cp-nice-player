@@ -1,10 +1,10 @@
 import * as fs from 'fs/promises';
-import { getPlaybackFormat, getPlaybackOggQuality } from '../../config';
-import { FfmpegCheckResult } from '../../ffmpegHost';
+import { getPlaybackOggQuality } from '../../config';
+import { contentTypeForEncodeFormat } from '../../encodeFormat';
+import { FfmpegCheckResult, getEffectiveEncodeFormat } from '../../ffmpegHost';
 import { transcodeChunk } from './ffmpegChunk';
 import {
 	chunkFilePath,
-	contentTypeForFormat,
 	tempChunkFilePath,
 } from './cache';
 import { StreamContext } from './resolve';
@@ -17,9 +17,9 @@ export class ChunkOutOfRangeError extends Error {
 	}
 }
 
-export type ChunkCacheStatus = 'hit' | 'miss';
+type ChunkCacheStatus = 'hit' | 'miss';
 
-export interface ChunkBytes {
+interface ChunkBytes {
 	buffer: Buffer;
 	contentType: string;
 	index: number;
@@ -62,7 +62,7 @@ async function readChunkFromDisk(
 	index: number,
 	manifest: StreamIndexManifest,
 ): Promise<ChunkBytes | undefined> {
-	const format = getPlaybackFormat();
+	const format = getEffectiveEncodeFormat();
 	const filePath = chunkFilePath(streamCtx.cacheDirFsPath, index, format);
 
 	try {
@@ -70,7 +70,7 @@ async function readChunkFromDisk(
 		const { startSec, durationSec } = chunkTimingFromManifest(index, manifest);
 		return {
 			buffer,
-			contentType: contentTypeForFormat(format),
+			contentType: contentTypeForEncodeFormat(format),
 			index,
 			startSec,
 			durationSec,
@@ -96,7 +96,7 @@ async function generateChunk(
 		throw new Error(ffmpeg.error ?? 'FFmpeg is not available.');
 	}
 
-	const format = getPlaybackFormat();
+	const format = getEffectiveEncodeFormat();
 	const oggQuality = getPlaybackOggQuality();
 	const { startSec, encodeEndSec, durationSec } = chunkTimingFromManifest(index, manifest);
 
@@ -131,7 +131,7 @@ async function generateChunk(
 		const buffer = await fs.readFile(outputPath);
 		return {
 			buffer,
-			contentType: contentTypeForFormat(format),
+			contentType: contentTypeForEncodeFormat(format),
 			index,
 			startSec,
 			durationSec,

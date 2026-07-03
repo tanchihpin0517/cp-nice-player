@@ -16,7 +16,7 @@ function packetEndSec(packet: AudioPacket): number {
 	return packet.ptsTimeSec + packet.durationSec;
 }
 
-export function findCrossfadeTail(
+function findCrossfadeTail(
 	packets: AudioPacket[],
 	endFrame: number,
 	endSec: number,

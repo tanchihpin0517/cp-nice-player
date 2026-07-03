@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 
-export interface AudioEntry {
+interface AudioEntry {
 	fsPath: string;
 	registeredAt: number;
 }

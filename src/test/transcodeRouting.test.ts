@@ -100,6 +100,31 @@ suite('Transcode routing', () => {
 		assert.strictEqual(args[args.indexOf('-to') + 1], '2');
 	});
 
+	test('buildFfmpegChunkArgs uses libmp3lame for mp3 fallback', () => {
+		const args = buildFfmpegChunkArgs('/input.flac', '/out/chunk_0.mp3', {
+			startSec: 0,
+			endSec: 1,
+			format: 'mp3',
+			oggQuality: 6,
+		});
+
+		assert.ok(args.includes('libmp3lame'));
+		assert.strictEqual(args[args.indexOf('-q:a') + 1], '6');
+		assert.strictEqual(args[args.length - 1], '/out/chunk_0.mp3');
+	});
+
+	test('buildFfmpegChunkArgs uses pcm_s16le for wav fallback', () => {
+		const args = buildFfmpegChunkArgs('/input.flac', '/out/chunk_0.wav', {
+			startSec: 0,
+			endSec: 1,
+			format: 'wav',
+			oggQuality: 6,
+		});
+
+		assert.ok(args.includes('pcm_s16le'));
+		assert.strictEqual(args[args.length - 1], '/out/chunk_0.wav');
+	});
+
 	test('formatFfmpegChunkCommandTemplate uses placeholders for per-chunk values', () => {
 		const template = formatFfmpegChunkCommandTemplate('/usr/bin/ffmpeg', {
 			format: 'ogg',

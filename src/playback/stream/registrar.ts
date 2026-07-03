@@ -4,7 +4,7 @@ import { Registry } from './registry';
 import { getOrCreateIndex } from './indexBuilder';
 import { resolveStreamContext } from './resolve';
 
-export interface RegisterResult {
+interface RegisterResult {
 	audioId: string;
 }
 

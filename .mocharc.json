@@ -1,5 +1,0 @@
-{
-	"ui": "tdd",
-	"require": "./test/headless/setup.js",
-	"spec": "out/test/**/*.test.js"
-}

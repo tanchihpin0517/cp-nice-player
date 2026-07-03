@@ -4,7 +4,7 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
-export interface ProbeResult {
+interface ProbeResult {
 	durationSec: number;
 	channels: number;
 	sampleRate: number;
@@ -18,7 +18,7 @@ export interface AudioPacket {
 	durationSec: number;
 }
 
-export interface FrameScanResult {
+interface FrameScanResult {
 	probe: ProbeResult;
 	fileSize: number;
 	packets: AudioPacket[];
@@ -78,7 +78,7 @@ function parseStreamMetadata(stdout: string): Pick<ProbeResult, 'channels' | 'sa
 	return { channels, sampleRate };
 }
 
-export function durationFromPackets(packets: AudioPacket[]): number {
+function durationFromPackets(packets: AudioPacket[]): number {
 	if (packets.length === 0) {
 		throw new Error('Cannot compute duration from empty packets');
 	}

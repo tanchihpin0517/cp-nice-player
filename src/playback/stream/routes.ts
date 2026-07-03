@@ -7,7 +7,7 @@ import { getOrCreateChunk, ChunkOutOfRangeError } from './chunk';
 import { getOrCreateIndex } from './indexBuilder';
 import { resolveStreamContext, AudioNotFoundError, SourceNotFoundError, StreamContext } from './resolve';
 
-export type RouteHandler = (
+type RouteHandler = (
 	req: http.IncomingMessage,
 	res: http.ServerResponse,
 	url: URL,

@@ -1,6 +1,6 @@
 import * as assert from 'assert';
-import { findCrossfadeTail, inferFrameAlignedChunks } from '../playback/stream/chunkPlanner';
-import { AudioPacket, durationFromPackets } from '../playback/stream/probe';
+import { inferFrameAlignedChunks } from '../playback/stream/chunkPlanner';
+import { AudioPacket } from '../playback/stream/probe';
 
 function packet(
 	index: number,
@@ -11,19 +11,6 @@ function packet(
 ): AudioPacket {
 	return { index, ptsTimeSec, durationSec, bytePos, sizeBytes };
 }
-
-suite('Probe duration', () => {
-	test('derives duration from first and last packet times', () => {
-		const packets: AudioPacket[] = [
-			packet(0, 0.0, 0.4, 0, 100),
-			packet(1, 0.4, 0.4, 100, 100),
-			packet(2, 0.8, 0.4, 200, 100),
-			packet(3, 1.2, 0.4, 300, 100),
-		];
-
-		assert.strictEqual(durationFromPackets(packets), 1.6);
-	});
-});
 
 suite('Chunk planner', () => {
 	test('splits packets around target duration', () => {
@@ -134,8 +121,9 @@ suite('Chunk planner', () => {
 			packet(2, 0.8, 0.4, 200, 100),
 		];
 
-		const tail = findCrossfadeTail(packets, 1, 0.8, 0.5, false);
-		assert.strictEqual(tail.crossfadeEndFrame, 2);
-		assert.ok(Math.abs(tail.crossfadeEndSec - 1.2) < 1e-9);
+		const chunks = inferFrameAlignedChunks(packets, 1.0, 300, 0.5);
+		assert.strictEqual(chunks.length, 2);
+		assert.strictEqual(chunks[0].crossfadeEndFrame, 2);
+		assert.ok(Math.abs(chunks[0].crossfadeEndSec - 1.2) < 1e-9);
 	});
 });

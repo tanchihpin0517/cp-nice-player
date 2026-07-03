@@ -3,7 +3,6 @@ import { PlaybackService } from '../playback/playbackService';
 import { WebviewPlayerSession } from './playerSession';
 import { PlayerSession } from './types';
 
-export { isSupportedAudio, MEDIA_FILE_FILTERS } from '../mediaTypes';
 export { getResourceRoots } from './playerSession';
 
 export function createPlayerSession(

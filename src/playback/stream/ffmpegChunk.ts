@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { PlaybackFormat } from '../../config';
+import { EncodeFormat } from '../../encodeFormat';
 
 function shellQuoteArg(arg: string): string {
 	if (/^[A-Za-z0-9_./:=+-]+$/.test(arg)) {
@@ -8,7 +8,7 @@ function shellQuoteArg(arg: string): string {
 	return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-export function formatFfmpegCommand(ffmpegPath: string, args: string[]): string {
+function formatFfmpegCommand(ffmpegPath: string, args: string[]): string {
 	return [ffmpegPath, ...args.map(shellQuoteArg)].join(' ');
 }
 
@@ -53,11 +53,15 @@ function runFfmpeg(
 	});
 }
 
-export interface TranscodeChunkOptions {
+interface TranscodeChunkOptions {
 	startSec: number | string;
 	endSec: number | string;
-	format: PlaybackFormat;
+	format: EncodeFormat;
 	oggQuality: number;
+}
+
+function mp3Quality(oggQuality: number): number {
+	return Math.min(9, Math.max(0, Math.round(oggQuality)));
 }
 
 export function buildFfmpegChunkArgs(
@@ -80,9 +84,17 @@ export function buildFfmpegChunkArgs(
 		inputFsPath,
 		'-vn',
 	];
-	return format === 'flac'
-		? [...baseArgs, '-c:a', 'flac', outputFsPath]
-		: [...baseArgs, '-c:a', 'libvorbis', '-q:a', String(oggQuality), outputFsPath];
+
+	switch (format) {
+		case 'flac':
+			return [...baseArgs, '-c:a', 'flac', outputFsPath];
+		case 'mp3':
+			return [...baseArgs, '-c:a', 'libmp3lame', '-q:a', String(mp3Quality(oggQuality)), outputFsPath];
+		case 'wav':
+			return [...baseArgs, '-c:a', 'pcm_s16le', outputFsPath];
+		default:
+			return [...baseArgs, '-c:a', 'libvorbis', '-q:a', String(oggQuality), outputFsPath];
+	}
 }
 
 export function formatFfmpegChunkCommandTemplate(

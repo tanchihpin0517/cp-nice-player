@@ -6,10 +6,10 @@ import * as vscode from 'vscode';
 import {
 	getChunkDurationSec,
 	getCrossfadeMs,
-	getPlaybackFormat,
 	getPlaybackOggQuality,
-	PlaybackFormat,
 } from '../../config';
+import { EncodeFormat, outputExtForEncodeFormat } from '../../encodeFormat';
+import { getEffectiveEncodeFormat } from '../../ffmpegHost';
 
 const STREAM_DIR_NAME = 'stream';
 const MAX_BASENAME_LENGTH = 80;
@@ -53,7 +53,7 @@ export function computeStreamCacheHash(
 	fsPath: string,
 	mtimeMs: number,
 	size: number,
-	format: PlaybackFormat,
+	format: EncodeFormat,
 	oggQuality: number,
 	chunkDurationSec: number,
 	crossfadeMs: number,
@@ -67,7 +67,7 @@ export async function computeCacheDirName(fsPath: string): Promise<string> {
 	const baseName = path.basename(fsPath);
 	const fileStem = sanitizeFileStem(baseName);
 	const sourceExt = sanitizeSourceExt(baseName);
-	const format = getPlaybackFormat();
+	const format = getEffectiveEncodeFormat();
 	const oggQuality = getPlaybackOggQuality();
 	const chunkDurationSec = getChunkDurationSec();
 	const crossfadeMs = getCrossfadeMs();
@@ -83,14 +83,6 @@ export async function computeCacheDirName(fsPath: string): Promise<string> {
 	return `${fileStem}_${sourceExt}_${hash}`;
 }
 
-export function outputExtForFormat(format: PlaybackFormat): string {
-	return format === 'flac' ? 'flac' : 'ogg';
-}
-
-export function contentTypeForFormat(format: PlaybackFormat): string {
-	return format === 'flac' ? 'audio/flac' : 'audio/ogg';
-}
-
 export function indexJsonPath(cacheDirFsPath: string): string {
 	return path.join(cacheDirFsPath, 'index.json');
 }
@@ -98,17 +90,17 @@ export function indexJsonPath(cacheDirFsPath: string): string {
 export function chunkFilePath(
 	cacheDirFsPath: string,
 	index: number,
-	format: PlaybackFormat,
+	format: EncodeFormat,
 ): string {
-	const ext = outputExtForFormat(format);
+	const ext = outputExtForEncodeFormat(format);
 	return path.join(cacheDirFsPath, `chunk_${index}.${ext}`);
 }
 
 export function tempChunkFilePath(
 	cacheDirFsPath: string,
 	index: number,
-	format: PlaybackFormat,
+	format: EncodeFormat,
 ): string {
-	const ext = outputExtForFormat(format);
+	const ext = outputExtForEncodeFormat(format);
 	return path.join(cacheDirFsPath, `temp_chunk_${index}.${ext}`);
 }

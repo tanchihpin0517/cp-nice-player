@@ -1,13 +1,14 @@
 import * as fs from 'fs/promises';
-import { getChunkDurationSec, getCrossfadeMs, getPlaybackFormat } from '../../config';
-import { FfmpegCheckResult } from '../../ffmpegHost';
+import { getChunkDurationSec, getCrossfadeMs } from '../../config';
+import {
+	codecForEncodeFormat,
+	contentTypeForEncodeFormat,
+	outputExtForEncodeFormat,
+} from '../../encodeFormat';
+import { FfmpegCheckResult, getEffectiveEncodeFormat } from '../../ffmpegHost';
 import { inferFrameAlignedChunks, ChunkEntry } from './chunkPlanner';
 import { scanAudioFrames } from './probe';
-import {
-	contentTypeForFormat,
-	indexJsonPath,
-	outputExtForFormat,
-} from './cache';
+import { indexJsonPath } from './cache';
 import { StreamContext } from './resolve';
 
 export interface StreamIndexManifest {
@@ -104,7 +105,7 @@ export function isValidStreamIndexManifest(value: unknown): value is StreamIndex
 function buildManifest(
 	frameScan: Awaited<ReturnType<typeof scanAudioFrames>>,
 ): StreamIndexManifest {
-	const format = getPlaybackFormat();
+	const format = getEffectiveEncodeFormat();
 	const targetDurationSec = getChunkDurationSec();
 	const crossfadeMs = getCrossfadeMs();
 	const chunks = inferFrameAlignedChunks(
@@ -113,7 +114,7 @@ function buildManifest(
 		frameScan.fileSize,
 		crossfadeMs / 1000,
 	);
-	const outputExt = outputExtForFormat(format);
+	const outputExt = outputExtForEncodeFormat(format);
 
 	return {
 		version: 1,
@@ -122,8 +123,8 @@ function buildManifest(
 		sampleRate: frameScan.probe.sampleRate,
 		encode: {
 			format: outputExt,
-			codec: outputExt,
-			contentType: contentTypeForFormat(format),
+			codec: codecForEncodeFormat(format),
+			contentType: contentTypeForEncodeFormat(format),
 		},
 		chunking: {
 			targetDurationSec,
@@ -135,9 +136,9 @@ function buildManifest(
 	};
 }
 
-export type IndexCacheStatus = 'hit' | 'miss';
+type IndexCacheStatus = 'hit' | 'miss';
 
-export interface IndexResult {
+interface IndexResult {
 	manifest: StreamIndexManifest;
 	cache: IndexCacheStatus;
 }

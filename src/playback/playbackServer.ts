@@ -1,10 +1,10 @@
 import * as http from 'http';
 import * as vscode from 'vscode';
-import { getDebugLogging, getPlaybackFormat, getPlaybackOggQuality } from '../config';
-import { checkFfmpegAvailable, FfmpegCheckResult } from '../ffmpegHost';
+import { getDebugLogging, getPlaybackOggQuality } from '../config';
+import { checkFfmpegAvailable, FfmpegCheckResult, getEffectiveEncodeFormat } from '../ffmpegHost';
 import { formatFfmpegChunkCommandTemplate } from './stream/ffmpegChunk';
 import { cleanStreamCacheDir } from './stream/cache';
-import { registerAudio as registerStreamAudio, RegisterResult } from './stream/registrar';
+import { registerAudio as registerStreamAudio } from './stream/registrar';
 import { Registry } from './stream/registry';
 import { createRouteHandlers, matchRoute } from './stream/routes';
 
@@ -55,7 +55,7 @@ export class PlaybackServer implements vscode.Disposable {
 		}
 	}
 
-	async registerAudio(fsPath: string, ffmpeg: FfmpegCheckResult): Promise<RegisterResult> {
+	async registerAudio(fsPath: string, ffmpeg: FfmpegCheckResult) {
 		return registerStreamAudio(this.context, this.registry, fsPath, ffmpeg);
 	}
 
@@ -109,7 +109,7 @@ export class PlaybackServer implements vscode.Disposable {
 					const ffmpeg = await checkFfmpegAvailable();
 					console.log(
 						`cp-nice-player: chunk transcode template: ${formatFfmpegChunkCommandTemplate(ffmpeg.path, {
-							format: getPlaybackFormat(),
+							format: getEffectiveEncodeFormat(),
 							oggQuality: getPlaybackOggQuality(),
 						})}`,
 					);
