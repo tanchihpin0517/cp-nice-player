@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-04
+
+### Added
+
+- Debug panel fields: `framesConsumed`, `totalFramesWritten`, and `wsolaDroppedFrames` for playhead/ring diagnostics.
+- Separate `chunkfinished` and `decodefinished` engine events; decode log includes WSOLA shift samples.
+
+### Changed
+
+- Playhead clock derived from ring frames consumed (not wall-clock time), with cumulative WSOLA head-sample drops added so the timeline stays aligned with manifest/source time.
+- Worklet ring stats reported at 20 Hz (sample-rate-derived interval) so `framesAvailable` stays fresh during steady playback.
+- Fetch loop and time-update ticker use independent intervals (`FETCH_INTERVAL_MS` / `TIME_UPDATE_INTERVAL_MS`).
+- Decode lookahead limited to one chunk past the current playhead chunk.
+
+### Fixed
+
+- Playhead and progress bar no longer race ahead of audible output during ring underruns/buffering stalls.
+- End-of-track detection also fires when the last chunk is decoded and the PCM ring is drained, not only on a time threshold.
+- Seek slider and current-time label no longer jump from `timeupdate` while the user is pressing or dragging the seek bar.
+
 ## [0.1.6] - 2026-06-30
 
 ### Changed
@@ -114,6 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio only — video tracks in container files are not played.
 - Chunk cache is session-scoped and cleared when the playback server stops or restarts.
 
+[0.1.7]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.7
 [0.1.6]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.6
 [0.1.5]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.5
 [0.1.4]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.4

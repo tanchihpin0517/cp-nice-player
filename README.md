@@ -76,6 +76,10 @@ Cached chunks live under the extension's global storage and are cleared when the
 
 ## Release notes
 
+### 0.1.7
+
+Accurate playhead from consumed PCM frames (with WSOLA drop compensation), so the UI stays in sync during buffering and at chunk joins. Worklet ring stats at 20 Hz, decode limited to one chunk ahead, and seek UI held steady while dragging. Debug panel adds frame-consumption and WSOLA diagnostics.
+
 ### 0.1.6
 
 Leaner webview debug UI and event log (fetch/decode completion only, with size and timing). Default crossfade is `20` ms. When `playback.debugLogging` is on, the extension logs effective settings at startup and one FFmpeg transcode template per server start.
