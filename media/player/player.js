@@ -94,8 +94,11 @@ function setPlayButtonLabel(playing) {
 
 function updateSeekUi(currentTime, duration) {
   playbackDuration.textContent = formatTime(duration);
+  if (pendingSeekDrag) {
+    return;
+  }
   playbackCurrentTime.textContent = formatTime(currentTime);
-  if (!pendingSeekDrag && Number.isFinite(duration) && duration > 0) {
+  if (Number.isFinite(duration) && duration > 0) {
     playbackSeek.value = String(currentTime / duration);
   }
 }
@@ -197,6 +200,10 @@ function bindControls() {
     })();
   });
 
+  playbackSeek.addEventListener('pointerdown', () => {
+    pendingSeekDrag = true;
+  });
+
   playbackSeek.addEventListener('input', () => {
     pendingSeekDrag = true;
     const duration = engine.getDuration();
@@ -212,6 +219,7 @@ function bindControls() {
     void engine.seek(next).then(() => {
       trackState.textContent = engine.getDiagnostics().paused ? 'Ready' : 'Playing';
       setPlayButtonLabel(!engine.getDiagnostics().paused);
+      updateSeekUi(engine.getCurrentTime(), engine.getDuration());
       updateDebugPanel();
     }).catch((error) => {
       const detail = error instanceof Error ? error.message : String(error);
@@ -219,6 +227,11 @@ function bindControls() {
       logEvent('error', detail);
       updateDebugPanel();
     });
+  });
+
+  playbackSeek.addEventListener('pointercancel', () => {
+    pendingSeekDrag = false;
+    updateSeekUi(engine.getCurrentTime(), engine.getDuration());
   });
 
   playbackVolume.addEventListener('input', () => {
