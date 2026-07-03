@@ -1,8 +1,6 @@
 import * as fs from 'fs/promises';
-import * as path from 'path';
-import * as vscode from 'vscode';
 import { Registry } from './registry';
-import { computeCacheDirName, getStreamCacheDir } from './cache';
+import { computeStreamKey } from './streamKey';
 
 export class AudioNotFoundError extends Error {
 	constructor(audioId: string) {
@@ -20,13 +18,11 @@ export class SourceNotFoundError extends Error {
 
 export interface StreamContext {
 	fsPath: string;
-	cacheDirName: string;
-	cacheDirFsPath: string;
+	key: string;
 }
 
 export async function resolveStreamContext(
 	registry: Registry,
-	context: vscode.ExtensionContext,
 	audioId: string,
 ): Promise<StreamContext> {
 	const fsPath = registry.resolveAudioId(audioId);
@@ -40,7 +36,6 @@ export async function resolveStreamContext(
 		throw new SourceNotFoundError(fsPath);
 	}
 
-	const cacheDirName = await computeCacheDirName(fsPath);
-	const cacheDirFsPath = path.join(getStreamCacheDir(context).fsPath, cacheDirName);
-	return { fsPath, cacheDirName, cacheDirFsPath };
+	const key = await computeStreamKey(fsPath);
+	return { fsPath, key };
 }

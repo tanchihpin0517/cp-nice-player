@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Removed the backend disk cache under `globalStorage/stream/`. Stream indexes are memoized in a bounded in-memory LRU for the playback server session; chunks are transcoded on the fly per request with no disk persistence.
+
 ## [0.1.7] - 2026-07-04
 
 ### Added

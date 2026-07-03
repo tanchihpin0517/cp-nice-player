@@ -1,12 +1,7 @@
-import * as fs from 'fs/promises';
 import { getPlaybackOggQuality } from '../../config';
 import { contentTypeForEncodeFormat } from '../../encodeFormat';
 import { FfmpegCheckResult, getEffectiveEncodeFormat } from '../../ffmpegHost';
-import { transcodeChunk } from './ffmpegChunk';
-import {
-	chunkFilePath,
-	tempChunkFilePath,
-} from './cache';
+import { transcodeChunkToBuffer } from './ffmpegChunk';
 import { StreamContext } from './resolve';
 import { getChunkEntry, StreamIndexManifest } from './indexBuilder';
 
@@ -17,15 +12,12 @@ export class ChunkOutOfRangeError extends Error {
 	}
 }
 
-type ChunkCacheStatus = 'hit' | 'miss';
-
 interface ChunkBytes {
 	buffer: Buffer;
 	contentType: string;
 	index: number;
 	startSec: number;
 	durationSec: number;
-	cache: ChunkCacheStatus;
 }
 
 const chunkInFlight = new Map<string, Promise<ChunkBytes>>();
@@ -40,8 +32,8 @@ function runSerialTranscode<T>(task: () => Promise<T>): Promise<T> {
 	return next;
 }
 
-function chunkKey(cacheDirName: string, index: number): string {
-	return `${cacheDirName}:${index}`;
+function chunkKey(key: string, index: number): string {
+	return `${key}:${index}`;
 }
 
 export function chunkTimingFromManifest(
@@ -57,41 +49,12 @@ export function chunkTimingFromManifest(
 	};
 }
 
-async function readChunkFromDisk(
-	streamCtx: StreamContext,
-	index: number,
-	manifest: StreamIndexManifest,
-): Promise<ChunkBytes | undefined> {
-	const format = getEffectiveEncodeFormat();
-	const filePath = chunkFilePath(streamCtx.cacheDirFsPath, index, format);
-
-	try {
-		const buffer = await fs.readFile(filePath);
-		const { startSec, durationSec } = chunkTimingFromManifest(index, manifest);
-		return {
-			buffer,
-			contentType: contentTypeForEncodeFormat(format),
-			index,
-			startSec,
-			durationSec,
-			cache: 'hit',
-		};
-	} catch {
-		return undefined;
-	}
-}
-
 async function generateChunk(
 	streamCtx: StreamContext,
 	ffmpeg: FfmpegCheckResult,
 	index: number,
 	manifest: StreamIndexManifest,
 ): Promise<ChunkBytes> {
-	const existing = await readChunkFromDisk(streamCtx, index, manifest);
-	if (existing) {
-		return existing;
-	}
-
 	if (!ffmpeg.available) {
 		throw new Error(ffmpeg.error ?? 'FFmpeg is not available.');
 	}
@@ -104,38 +67,19 @@ async function generateChunk(
 		throw new ChunkOutOfRangeError(index, manifest.chunking.count);
 	}
 
-	await fs.mkdir(streamCtx.cacheDirFsPath, { recursive: true });
-
-	const outputPath = chunkFilePath(streamCtx.cacheDirFsPath, index, format);
-	const tempPath = tempChunkFilePath(streamCtx.cacheDirFsPath, index, format);
-
 	return runSerialTranscode(async () => {
-		const cachedAfterWait = await readChunkFromDisk(streamCtx, index, manifest);
-		if (cachedAfterWait) {
-			return cachedAfterWait;
-		}
-
-		try {
-			await transcodeChunk(ffmpeg.path, streamCtx.fsPath, tempPath, {
-				startSec,
-				endSec: encodeEndSec,
-				format,
-				oggQuality,
-			});
-			await fs.rename(tempPath, outputPath);
-		} catch (err) {
-			await fs.rm(tempPath, { force: true }).catch(() => undefined);
-			throw err;
-		}
-
-		const buffer = await fs.readFile(outputPath);
+		const buffer = await transcodeChunkToBuffer(ffmpeg.path, streamCtx.fsPath, {
+			startSec,
+			endSec: encodeEndSec,
+			format,
+			oggQuality,
+		});
 		return {
 			buffer,
 			contentType: contentTypeForEncodeFormat(format),
 			index,
 			startSec,
 			durationSec,
-			cache: 'miss',
 		};
 	});
 }
@@ -150,12 +94,7 @@ export async function getOrCreateChunk(
 		throw new ChunkOutOfRangeError(index, manifest.chunking.count);
 	}
 
-	const cached = await readChunkFromDisk(streamCtx, index, manifest);
-	if (cached) {
-		return cached;
-	}
-
-	const key = chunkKey(streamCtx.cacheDirName, index);
+	const key = chunkKey(streamCtx.key, index);
 	const inFlight = chunkInFlight.get(key);
 	if (inFlight) {
 		return inFlight;

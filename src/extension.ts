@@ -26,7 +26,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	});
 	context.subscriptions.push(configChange);
 
-	const playbackService = new PlaybackService(context);
+	const playbackService = new PlaybackService();
 	try {
 		await playbackService.ensureStarted();
 	} catch (err) {
@@ -85,5 +85,5 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate(): void {
-	// Stream cache cleanup runs synchronously in PlaybackServer.dispose().
+	// In-memory stream index is cleared in PlaybackServer.start() and dispose().
 }

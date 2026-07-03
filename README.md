@@ -12,7 +12,6 @@ Instead of transcoding an entire file before play starts, CP's Nice Player scans
 - **Bounded memory** — The webview keeps a configurable window of decoded PCM, not the whole track.
 - **Broad format support** — MP3, WAV, OGG, Opus, FLAC, M4A, AAC, WebM, MP4, and MKV containers open in the custom editor (audio tracks only).
 - **Remote development** — Playback works over Remote SSH, Dev Containers, WSL, and Codespaces via VS Code port forwarding.
-- **Disk cache** — Transcoded chunks are reused while the playback server is running.
 - **Configurable output** — Stream as Ogg Vorbis (default) or FLAC, with tunable chunk size and buffer depth.
 
 ## Installation
@@ -54,8 +53,6 @@ When you open a track:
 6. At chunk seams, a WSOLA-aligned linear crossfade blends the overlap tail of one chunk with the head of the next.
 7. On seek, in-flight fetches are cancelled and buffering reprioritizes around the new position.
 
-Cached chunks live under the extension's global storage and are cleared when the playback server stops or restarts.
-
 ## Extension settings
 
 | Setting | Default | Description |
@@ -66,13 +63,13 @@ Cached chunks live under the extension's global storage and are cleared when the
 | `cp-nice-player.playback.chunkDurationSec` | `1` | Target duration of each streamed chunk in seconds (`0.5`–`10`). |
 | `cp-nice-player.playback.crossfadeMs` | `20` | Per-chunk overlap tail length in milliseconds (`0`–`500`). Non-final chunks encode a short tail past the body boundary; the player crossfades it with the next chunk. Set to `0` to disable crossfade. |
 | `cp-nice-player.playback.chunkBufferCount` | `5` | Number of chunks to buffer ahead of the playhead, including the current chunk. At 1 s chunks, `5` ≈ 5 s of buffered audio. |
+| `cp-nice-player.playback.maxIndexEntries` | `64` | Maximum stream index manifests kept in memory for the playback server session (`1`–`256`). |
 | `cp-nice-player.playback.debugLogging` | `false` | Log playback settings and transcode template at startup, plus per-request server activity, to the extension host console. |
 
 ## Known limitations
 
 - **Audio only** — Video tracks are not played; only the audio stream is handled.
 - **VS Code only** — Streaming is served through VS Code's port forwarding to the extension's localhost server, not for external media players or standalone network deployment.
-- **Session cache** — Chunk cache is wiped when the playback server stops or VS Code reloads the extension.
 
 ## Release notes
 

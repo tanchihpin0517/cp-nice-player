@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import { codecForEncodeFormat, EncodeFormat } from '../encodeFormat';
-import { transcodeChunk } from '../playback/stream/ffmpegChunk';
+import { transcodeChunk, transcodeChunkToBuffer } from '../playback/stream/ffmpegChunk';
 import { ffprobePathFromFfmpeg } from '../playback/stream/probe';
 
 const execFileAsync = promisify(execFile);
@@ -204,4 +204,29 @@ suite('FFmpeg transcode', () => {
 		const duration = await probeDuration(ffprobePathFromFfmpeg(ffmpegPath), outputPath);
 		assert.ok(Math.abs(duration - 1) <= DURATION_TOLERANCE_SEC);
 	});
+
+	for (const format of ['ogg', 'flac', 'mp3', 'wav'] as const) {
+		test(`transcodeChunkToBuffer produces a ${format} chunk via stdout`, async function () {
+			skipUnlessAvailable(this, format);
+
+			const buffer = await transcodeChunkToBuffer(ffmpegPath, inputPath, {
+				startSec: 0,
+				endSec: 1,
+				format,
+				oggQuality: 6,
+			});
+			assert.ok(buffer.length > 0);
+
+			if (format === 'flac') {
+				assert.strictEqual(buffer.subarray(0, 4).toString('ascii'), 'fLaC');
+				return;
+			}
+
+			const ext = format === 'ogg' ? 'ogg' : format;
+			const outputPath = path.join(workDir, `pipe_chunk_0.${ext}`);
+			await fs.writeFile(outputPath, buffer);
+			const duration = await probeDuration(ffprobePathFromFfmpeg(ffmpegPath), outputPath);
+			assert.ok(Math.abs(duration - 1) <= DURATION_TOLERANCE_SEC);
+		});
+	}
 });

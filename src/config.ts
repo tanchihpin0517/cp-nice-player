@@ -37,6 +37,13 @@ export function getChunkBufferCount(): number {
 	return Math.min(20, Math.max(1, Math.round(value)));
 }
 
+export function getMaxIndexEntries(): number {
+	const value = vscode.workspace
+		.getConfiguration('cp-nice-player')
+		.get<number>('playback.maxIndexEntries', 64);
+	return Math.min(256, Math.max(1, Math.round(value)));
+}
+
 export function getDebugLogging(): boolean {
 	return vscode.workspace
 		.getConfiguration('cp-nice-player')
@@ -61,6 +68,7 @@ export function logPlaybackSettings(): void {
 			+ `chunkDurationSec=${getChunkDurationSec()}, `
 			+ `crossfadeMs=${getCrossfadeMs()}, `
 			+ `chunkBufferCount=${getChunkBufferCount()}, `
+			+ `maxIndexEntries=${getMaxIndexEntries()}, `
 			+ `debugLogging=${getDebugLogging()}`,
 	);
 }

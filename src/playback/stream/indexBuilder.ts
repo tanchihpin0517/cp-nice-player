@@ -1,5 +1,4 @@
-import * as fs from 'fs/promises';
-import { getChunkDurationSec, getCrossfadeMs } from '../../config';
+import { getChunkDurationSec, getCrossfadeMs, getMaxIndexEntries } from '../../config';
 import {
 	codecForEncodeFormat,
 	contentTypeForEncodeFormat,
@@ -8,7 +7,6 @@ import {
 import { FfmpegCheckResult, getEffectiveEncodeFormat } from '../../ffmpegHost';
 import { inferFrameAlignedChunks, ChunkEntry } from './chunkPlanner';
 import { scanAudioFrames } from './probe';
-import { indexJsonPath } from './cache';
 import { StreamContext } from './resolve';
 
 export interface StreamIndexManifest {
@@ -136,26 +134,34 @@ function buildManifest(
 	};
 }
 
-type IndexCacheStatus = 'hit' | 'miss';
+const indexCache = new Map<string, StreamIndexManifest>();
+const indexInFlight = new Map<string, Promise<StreamIndexManifest>>();
 
-interface IndexResult {
-	manifest: StreamIndexManifest;
-	cache: IndexCacheStatus;
+function getCachedIndex(key: string): StreamIndexManifest | undefined {
+	const manifest = indexCache.get(key);
+	if (!manifest) {
+		return undefined;
+	}
+	indexCache.delete(key);
+	indexCache.set(key, manifest);
+	return manifest;
 }
 
-const indexInFlight = new Map<string, Promise<IndexResult>>();
-
-async function readCachedIndex(indexPath: string): Promise<StreamIndexManifest | undefined> {
-	try {
-		const cached = await fs.readFile(indexPath, 'utf8');
-		const parsed: unknown = JSON.parse(cached);
-		if (isValidStreamIndexManifest(parsed)) {
-			return parsed;
+function setCachedIndex(key: string, manifest: StreamIndexManifest): void {
+	if (indexCache.has(key)) {
+		indexCache.delete(key);
+	} else if (indexCache.size >= getMaxIndexEntries()) {
+		const oldest = indexCache.keys().next().value;
+		if (oldest !== undefined) {
+			indexCache.delete(oldest);
 		}
-	} catch {
-		// cache miss
 	}
-	return undefined;
+	indexCache.set(key, manifest);
+}
+
+export function clearStreamIndexCache(): void {
+	indexCache.clear();
+	indexInFlight.clear();
 }
 
 export function getChunkEntry(manifest: StreamIndexManifest, index: number): ChunkEntry {
@@ -169,37 +175,34 @@ export function getChunkEntry(manifest: StreamIndexManifest, index: number): Chu
 export async function getOrCreateIndex(
 	streamCtx: StreamContext,
 	ffmpeg: FfmpegCheckResult,
-): Promise<IndexResult> {
-	const indexPath = indexJsonPath(streamCtx.cacheDirFsPath);
-	const cached = await readCachedIndex(indexPath);
+): Promise<StreamIndexManifest> {
+	const cached = getCachedIndex(streamCtx.key);
 	if (cached) {
-		return { manifest: cached, cache: 'hit' };
+		return cached;
 	}
 
 	if (!ffmpeg.available) {
 		throw new Error(ffmpeg.error ?? 'FFmpeg is not available.');
 	}
-	const inFlight = indexInFlight.get(streamCtx.cacheDirName);
+
+	const inFlight = indexInFlight.get(streamCtx.key);
 	if (inFlight) {
 		return inFlight;
 	}
 
-	const task = (async (): Promise<IndexResult> => {
-		await fs.mkdir(streamCtx.cacheDirFsPath, { recursive: true });
-		const recached = await readCachedIndex(indexPath);
+	const task = (async (): Promise<StreamIndexManifest> => {
+		const recached = getCachedIndex(streamCtx.key);
 		if (recached) {
-			return { manifest: recached, cache: 'hit' };
+			return recached;
 		}
 
 		const frameScan = await scanAudioFrames(ffmpeg.path, streamCtx.fsPath);
 		const manifest = buildManifest(frameScan);
-		const tempPath = `${indexPath}.tmp`;
-		await fs.writeFile(tempPath, JSON.stringify(manifest, null, 2), 'utf8');
-		await fs.rename(tempPath, indexPath);
-		return { manifest, cache: 'miss' };
+		setCachedIndex(streamCtx.key, manifest);
+		return manifest;
 	})().finally(() => {
-		indexInFlight.delete(streamCtx.cacheDirName);
+		indexInFlight.delete(streamCtx.key);
 	});
-	indexInFlight.set(streamCtx.cacheDirName, task);
+	indexInFlight.set(streamCtx.key, task);
 	return task;
 }

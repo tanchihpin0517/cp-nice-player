@@ -1,5 +1,4 @@
 import * as http from 'http';
-import * as vscode from 'vscode';
 import { getDebugLogging } from '../../config';
 import { checkFfmpegAvailable, FfmpegCheckResult } from '../../ffmpegHost';
 import { Registry } from './registry';
@@ -47,7 +46,6 @@ type AudioRouteHandler = (
 
 function withAudio(
 	registry: Registry,
-	context: vscode.ExtensionContext,
 	handler: AudioRouteHandler,
 ): RouteHandler {
 	return async (_req, res, url) => {
@@ -64,7 +62,7 @@ function withAudio(
 				throw new Error(ffmpeg.error ?? 'FFmpeg is not available.');
 			}
 
-			const streamCtx = await resolveStreamContext(registry, context, audioId);
+			const streamCtx = await resolveStreamContext(registry, audioId);
 			await handler(res, audioId, ffmpeg, streamCtx, url);
 		} catch (err) {
 			sendError(res, err, audioId);
@@ -74,28 +72,26 @@ function withAudio(
 
 export function createRouteHandlers(
 	registry: Registry,
-	context: vscode.ExtensionContext,
 ): Map<string, RouteHandler> {
 	const handlers = new Map<string, RouteHandler>();
 
 	handlers.set(
 		'/index',
-		withAudio(registry, context, async (res, audioId, ffmpeg, streamCtx, _url) => {
-			const index = await getOrCreateIndex(streamCtx, ffmpeg);
+		withAudio(registry, async (res, audioId, ffmpeg, streamCtx, _url) => {
+			const manifest = await getOrCreateIndex(streamCtx, ffmpeg);
 			if (getDebugLogging()) {
-				console.log(`cp-nice-player: index audioId=${audioId} cache=${index.cache}`);
+				console.log(`cp-nice-player: index audioId=${audioId}`);
 			}
 			res.writeHead(200, {
 				'Content-Type': 'application/json',
-				'X-Cache': index.cache,
 			});
-			res.end(JSON.stringify(index.manifest));
+			res.end(JSON.stringify(manifest));
 		}),
 	);
 
 	handlers.set(
 		'/chunk/:index',
-		withAudio(registry, context, async (res, audioId, ffmpeg, streamCtx, url) => {
+		withAudio(registry, async (res, audioId, ffmpeg, streamCtx, url) => {
 			const chunkMatch = url.pathname.match(/^\/chunk\/(\d+)$/);
 			const chunkIndex = chunkMatch ? Number(chunkMatch[1]) : NaN;
 			if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
@@ -104,18 +100,17 @@ export function createRouteHandlers(
 				return;
 			}
 
-			const index = await getOrCreateIndex(streamCtx, ffmpeg);
-			const chunk = await getOrCreateChunk(streamCtx, ffmpeg, chunkIndex, index.manifest);
+			const manifest = await getOrCreateIndex(streamCtx, ffmpeg);
+			const chunk = await getOrCreateChunk(streamCtx, ffmpeg, chunkIndex, manifest);
 
 			if (getDebugLogging()) {
 				console.log(
-					`cp-nice-player: chunk ${chunk.index} audioId=${audioId} cache=${chunk.cache}`,
+					`cp-nice-player: chunk ${chunk.index} audioId=${audioId}`,
 				);
 			}
 			res.writeHead(200, {
 				'Content-Type': chunk.contentType,
 				'Content-Length': chunk.buffer.length,
-				'X-Cache': chunk.cache,
 				'X-Chunk-Index': String(chunk.index),
 				'X-Chunk-Start-Sec': String(chunk.startSec),
 				'X-Chunk-Duration-Sec': String(chunk.durationSec),

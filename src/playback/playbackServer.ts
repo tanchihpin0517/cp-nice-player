@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { getDebugLogging, getPlaybackOggQuality } from '../config';
 import { checkFfmpegAvailable, FfmpegCheckResult, getEffectiveEncodeFormat } from '../ffmpegHost';
 import { formatFfmpegChunkCommandTemplate } from './stream/ffmpegChunk';
-import { cleanStreamCacheDir } from './stream/cache';
+import { clearStreamIndexCache } from './stream/indexBuilder';
 import { registerAudio as registerStreamAudio } from './stream/registrar';
 import { Registry } from './stream/registry';
 import { createRouteHandlers, matchRoute } from './stream/routes';
@@ -17,8 +17,8 @@ export class PlaybackServer implements vscode.Disposable {
 	private readonly registry = new Registry();
 	private readonly routeHandlers: ReturnType<typeof createRouteHandlers>;
 
-	constructor(private readonly context: vscode.ExtensionContext) {
-		this.routeHandlers = createRouteHandlers(this.registry, this.context);
+	constructor() {
+		this.routeHandlers = createRouteHandlers(this.registry);
 	}
 
 	async start(): Promise<number> {
@@ -31,7 +31,7 @@ export class PlaybackServer implements vscode.Disposable {
 		}
 
 		if (!this.listenPromise) {
-			cleanStreamCacheDir(this.context);
+			clearStreamIndexCache();
 			this.listenPromise = this.bindServer();
 		}
 
@@ -56,7 +56,7 @@ export class PlaybackServer implements vscode.Disposable {
 	}
 
 	async registerAudio(fsPath: string, ffmpeg: FfmpegCheckResult) {
-		return registerStreamAudio(this.context, this.registry, fsPath, ffmpeg);
+		return registerStreamAudio(this.registry, fsPath, ffmpeg);
 	}
 
 	unregisterAudio(audioId: string): void {
@@ -70,7 +70,7 @@ export class PlaybackServer implements vscode.Disposable {
 	dispose(): void {
 		this.disposed = true;
 		this.registry.clear();
-		cleanStreamCacheDir(this.context);
+		clearStreamIndexCache();
 		this.server?.close();
 		this.server = undefined;
 		this.listenPromise = undefined;

@@ -113,6 +113,17 @@ suite('Transcode routing', () => {
 		assert.strictEqual(args[args.length - 1], '/out/chunk_0.mp3');
 	});
 
+	test('buildFfmpegChunkArgs adds mux format for pipe output', () => {
+		const args = buildFfmpegChunkArgs('/input.flac', 'pipe:1', {
+			startSec: 0,
+			endSec: 1,
+			format: 'ogg',
+			oggQuality: 6,
+		});
+
+		assert.deepStrictEqual(args.slice(-3), ['-f', 'ogg', 'pipe:1']);
+	});
+
 	test('buildFfmpegChunkArgs uses pcm_s16le for wav fallback', () => {
 		const args = buildFfmpegChunkArgs('/input.flac', '/out/chunk_0.wav', {
 			startSec: 0,

@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { EncodeFormat } from '../../encodeFormat';
+import { EncodeFormat, outputExtForEncodeFormat } from '../../encodeFormat';
 
 function shellQuoteArg(arg: string): string {
 	if (/^[A-Za-z0-9_./:=+-]+$/.test(arg)) {
@@ -12,14 +12,24 @@ function formatFfmpegCommand(ffmpegPath: string, args: string[]): string {
 	return [ffmpegPath, ...args.map(shellQuoteArg)].join(' ');
 }
 
+interface FfmpegRunResult {
+	stdout: Buffer[];
+	stderr: string;
+}
+
 function runFfmpeg(
 	ffmpegPath: string,
 	args: string[],
 	signal?: AbortSignal,
-): Promise<void> {
+): Promise<FfmpegRunResult> {
 	return new Promise((resolve, reject) => {
 		const proc = spawn(ffmpegPath, args);
+		const stdout: Buffer[] = [];
 		let stderr = '';
+
+		proc.stdout.on('data', (chunk: Buffer) => {
+			stdout.push(chunk);
+		});
 
 		proc.stderr.setEncoding('utf8');
 		proc.stderr.on('data', (chunk: string) => {
@@ -44,7 +54,7 @@ function runFfmpeg(
 				return;
 			}
 			if (code === 0) {
-				resolve();
+				resolve({ stdout, stderr });
 			} else {
 				const detail = stderr.trim() || `ffmpeg exited with code ${code}`;
 				reject(new Error(detail));
@@ -62,6 +72,26 @@ interface TranscodeChunkOptions {
 
 function mp3Quality(oggQuality: number): number {
 	return Math.min(9, Math.max(0, Math.round(oggQuality)));
+}
+
+function encodeOutputArgs(
+	format: EncodeFormat,
+	outputFsPath: string,
+	oggQuality: number,
+): string[] {
+	const muxArgs =
+		outputFsPath === 'pipe:1' ? ['-f', outputExtForEncodeFormat(format)] : [];
+
+	switch (format) {
+		case 'flac':
+			return ['-c:a', 'flac', ...muxArgs, outputFsPath];
+		case 'mp3':
+			return ['-c:a', 'libmp3lame', '-q:a', String(mp3Quality(oggQuality)), ...muxArgs, outputFsPath];
+		case 'wav':
+			return ['-c:a', 'pcm_s16le', ...muxArgs, outputFsPath];
+		default:
+			return ['-c:a', 'libvorbis', '-q:a', String(oggQuality), ...muxArgs, outputFsPath];
+	}
 }
 
 export function buildFfmpegChunkArgs(
@@ -85,16 +115,7 @@ export function buildFfmpegChunkArgs(
 		'-vn',
 	];
 
-	switch (format) {
-		case 'flac':
-			return [...baseArgs, '-c:a', 'flac', outputFsPath];
-		case 'mp3':
-			return [...baseArgs, '-c:a', 'libmp3lame', '-q:a', String(mp3Quality(oggQuality)), outputFsPath];
-		case 'wav':
-			return [...baseArgs, '-c:a', 'pcm_s16le', outputFsPath];
-		default:
-			return [...baseArgs, '-c:a', 'libvorbis', '-q:a', String(oggQuality), outputFsPath];
-	}
+	return [...baseArgs, ...encodeOutputArgs(format, outputFsPath, oggQuality)];
 }
 
 export function formatFfmpegChunkCommandTemplate(
@@ -117,5 +138,19 @@ export async function transcodeChunk(
 	options: TranscodeChunkOptions,
 	signal?: AbortSignal,
 ): Promise<void> {
-	return runFfmpeg(ffmpegPath, buildFfmpegChunkArgs(inputFsPath, outputFsPath, options), signal);
+	await runFfmpeg(ffmpegPath, buildFfmpegChunkArgs(inputFsPath, outputFsPath, options), signal);
+}
+
+export async function transcodeChunkToBuffer(
+	ffmpegPath: string,
+	inputFsPath: string,
+	options: TranscodeChunkOptions,
+	signal?: AbortSignal,
+): Promise<Buffer> {
+	const { stdout } = await runFfmpeg(
+		ffmpegPath,
+		buildFfmpegChunkArgs(inputFsPath, 'pipe:1', options),
+		signal,
+	);
+	return Buffer.concat(stdout);
 }

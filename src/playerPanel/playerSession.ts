@@ -9,7 +9,6 @@ import {
 import { EncodeFormat } from '../encodeFormat';
 import { FfmpegCheckResult, getEffectiveEncodeFormat } from '../ffmpegHost';
 import { isSupportedAudio } from '../mediaTypes';
-import { getStreamCacheDir } from '../playback/stream/cache';
 import { PlaybackService } from '../playback/playbackService';
 import { PlayerSession } from './types';
 
@@ -197,7 +196,6 @@ export class WebviewPlayerSession implements PlayerSession {
 export function getResourceRoots(
 	extensionUri: vscode.Uri,
 	mediaUri?: vscode.Uri,
-	context?: vscode.ExtensionContext,
 ): vscode.Uri[] {
 	const roots = new Map<string, vscode.Uri>();
 	roots.set(extensionUri.toString(), extensionUri);
@@ -209,11 +207,6 @@ export function getResourceRoots(
 	if (mediaUri) {
 		const mediaDirectory = vscode.Uri.file(path.dirname(mediaUri.fsPath));
 		roots.set(mediaDirectory.toString(), mediaDirectory);
-	}
-
-	if (context) {
-		const streamCacheDir = getStreamCacheDir(context);
-		roots.set(streamCacheDir.toString(), streamCacheDir);
 	}
 
 	return [...roots.values()];

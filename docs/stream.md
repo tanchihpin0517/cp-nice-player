@@ -14,7 +14,7 @@ Inspired by [CMAF](https://en.wikipedia.org/wiki/Common_Media_Application_Format
 | In scope                                                                | Out of scope                                                                   |
 | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | Replace backend, extension wiring, and webview playback in one refactor | Legacy full-file playback or dual code paths                                   |
-| Chunked stream cache under `globalStorage/stream/`                      | Persistent cache only while server is running (wiped on server start and stop) |
+| Chunked streaming with in-memory index memoization                      | Persistent disk cache under `globalStorage/stream/`                            |
 | `audioId` registry, `/index`, `/chunk/{n}`                              | `playback.mode`, `/audio`, `preparePlayback`                                   |
 
 
@@ -31,7 +31,7 @@ Inspired by [CMAF](https://en.wikipedia.org/wiki/Common_Media_Application_Format
 | **Seek without re-downloading everything** | Today `AudioEngine.load()` fetches `/audio` in one shot and decodes the full file into one `AudioBuffer`. Seeking reuses that buffer (good) but initial load cost is O(file). |
 | **Bounded memory in the webview**          | Full-file decode scales with duration × sample rate × channels. Streaming keeps a sliding window of PCM (or encoded chunks) in memory.                                        |
 | **Reuse host FFmpeg**                      | Keep transcoding on the extension host; webview only fetches HTTP and decodes.                                                                                                |
-| **Cache-friendly**                         | Chunk files should be hash-addressable and reusable on disk; caching is entirely a backend concern.                                                                           |
+| **In-memory index memoization**          | Frame scan is expensive; index manifests are cached in a bounded LRU for the playback server session. Chunks are transcoded on the fly per request. |
 
 
 Non-goals:
@@ -66,9 +66,9 @@ See **[Dataflow](#dataflow)** for diagrams. In short:
 [Media file]
     ↓ extension registers file → audio_id (backend lookup table)
     ↓ extension scans audio frames on file open
-[index.json manifest — per-chunk start/end sec, byte, frame]
+[index manifest — per-chunk start/end sec, byte, frame]  ← in-memory LRU, keyed by stream hash
     ↓ on demand per /chunk/{n} request
-[Chunk N] encoded segment (ogg)  ← FFmpeg byte seek + frame count, disk cache internal
+[Chunk N] encoded segment (ogg)  ← FFmpeg time seek, stdout → Buffer (no disk)
     ↓ per chunk in webview
 [PCM frames] → ring buffer → Web Audio scheduler
 ```
@@ -81,11 +81,11 @@ See **[Dataflow](#dataflow)** for diagrams. In short:
 4. Webview fetches `**GET {serverUrl}/index?audioId=…**`.
 5. Backend looks up `audioId` → `fsPath`, loads frame-derived index (or builds it once), returns manifest JSON.
 6. Webview requests `**GET {serverUrl}/chunk/{n}?audioId=…**` based on playhead and buffer policy.
-7. Backend resolves path from registry, reads chunk `n` from index (`startByte`, `startFrame`, `endFrame`), hits disk cache or transcodes with byte seek + frame count, returns chunk bytes.
+7. Backend resolves path from registry, reads chunk `n` from index, transcodes with time seek via FFmpeg stdout, returns chunk bytes.
 8. Webview **decodes each chunk to PCM**, appends to a playable buffer, and drives Web Audio from that window.
 9. On tab close / file change, extension calls `**unregisterAudio(audioId)`**.
 
-The frontend only knows `serverUrl`, `audioId`, and chunk numbers. No paths, cache keys, or encoding in URLs.
+The frontend only knows `serverUrl`, `audioId`, and chunk numbers. No paths or encoding in URLs.
 
 ---
 
@@ -108,9 +108,9 @@ flowchart TB
     Reg[("Audio registry\naudioId ↔ fsPath")]
     Resolve["Lookup audioId"]
     FrameScan["Frame scan\nffprobe pts + byte + frame index"]
-    IndexBuild["Infer ~1s chunks\nwrite index.json"]
-    ChunkGen["Chunk transcoder\n-byte_seek -ss {byte}B\n-frames:a {frameCount}"]
-    Disk[("Disk cache\n{stem}_{ext}_{hash}/\nindex.json + chunk_*.ogg")]
+    IndexBuild["Infer ~1s chunks\nstore in LRU"]
+    ChunkGen["Chunk transcoder\n-ss {startSec} -to {encodeEndSec}\nstdout → Buffer"]
+    IndexMem[("In-memory index LRU\nkeyed by stream hash")]
   end
 
   subgraph decode ["Webview decode & play"]
@@ -129,23 +129,22 @@ flowchart TB
   Srv --> FrameScan
   FrameScan -->|"scan frames"| File
   FrameScan --> IndexBuild
-  IndexBuild -->|"index.json\nstart/end sec·byte·frame"| Disk
+  IndexBuild -->|"manifest\nstart/end sec·byte·frame"| IndexMem
   Ext -.->|"postMessage\nserverUrl + audioId"| UI
 
   UI --> Idx
   Idx -->|"GET /index?audioId=…"| Srv
   Srv --> Resolve
   Resolve --> Reg
-  Resolve -->|"read index.json"| Disk
+  Resolve -->|"LRU get"| IndexMem
   Resolve -->|"manifest JSON"| Idx
 
   UI --> Loader
   Loader -->|"GET /chunk/{n}?audioId=…"| Srv
   Srv --> Resolve
   Resolve -->|"chunk map entry n"| ChunkGen
-  ChunkGen -->|"cache miss"| File
-  ChunkGen --> Disk
-  Disk -->|"cache hit / read"| Srv
+  ChunkGen -->|"time seek"| File
+  ChunkGen -->|"encoded bytes"| Srv
   Srv -->|"encoded chunk bytes"| Loader
 
   Loader --> Dec
@@ -181,8 +180,8 @@ flowchart LR
   subgraph srv ["Backend"]
     MAP[("Registry\naudioId → fsPath")]
     R["Lookup audioId"]
-    CK["cacheDirName\n{stem}_{ext}_{hash}"]
-    IDXJ["index.json\nchunk map"]
+    CK["stream key\nSHA-256 hash"]
+    IDXJ["index manifest\nchunk map"]
     OUT["manifest JSON or chunk bytes"]
     R --> MAP
     R --> CK --> IDXJ --> OUT
@@ -198,42 +197,37 @@ flowchart LR
 
 | Step       | Who                  | Action                                                  |
 | ---------- | -------------------- | ------------------------------------------------------- |
-| Register   | Extension (internal) | `registerAudio(fsPath)` → frame scan → `index.json` → `audioId`; store in registry  |
+| Register   | Extension (internal) | `registerAudio(fsPath)` → frame scan → index manifest → `audioId`; store in registry  |
 | Index      | Webview              | `GET /index?audioId=…` → lookup → frame-derived index → manifest      |
-| Chunk      | Webview              | `GET /chunk/{n}?audioId=…` → lookup → index chunk map → byte seek + frame transcode or cache hit |
+| Chunk      | Webview              | `GET /chunk/{n}?audioId=…` → lookup → index chunk map → time seek + transcode to Buffer |
 | Unregister | Extension on dispose | `unregisterAudio(audioId)` → remove from registry       |
 
 
-### Chunk path (cache miss vs hit)
+### Chunk path (on-the-fly transcode)
 
 ```mermaid
 flowchart TD
   REQ["GET /chunk/{n}?audioId=…"]
-  RESOLVE["Lookup audioId → fsPath\ncompute cacheDirName"]
-  INDEX["Read chunk n from index.json\nstartByte · startFrame · endFrame\nframeCount = endFrame - startFrame + 1"]
-  CACHE{"chunk on disk?"}
-  FF["FFmpeg byte seek + frame cut\n-byte_seek 1 -ss {startByte}B\n-frames:a {frameCount}"]
-  WRITE["Write cache file"]
-  READ["Read cache file"]
+  RESOLVE["Lookup audioId → fsPath\ncompute stream key"]
+  INDEX["Read chunk n from index LRU\nstartSec · encodeEndSec"]
+  FF["FFmpeg time seek\n-ss {startSec} -to {encodeEndSec}\npipe:1 → Buffer"]
   RESP["HTTP 200\naudio/ogg body"]
 
-  REQ --> RESOLVE --> INDEX --> CACHE
-  CACHE -->|miss| FF --> WRITE --> READ --> RESP
-  CACHE -->|hit| READ --> RESP
+  REQ --> RESOLVE --> INDEX --> FF --> RESP
 ```
 
 
 
 ### Seek dataflow
 
-On seek, the webview cancels in-flight chunk fetches and reprioritizes around the new playhead. Cached chunks on disk are reused without re-encoding.
+On seek, the webview cancels in-flight chunk fetches and reprioritizes around the new playhead. Each chunk request transcodes fresh via FFmpeg stdout.
 
 ```mermaid
 flowchart LR
   Seek["User seeks to t sec"]
   Calc["chunkIndex from manifest\nstartSec <= t < endSec"]
   Abort["Abort pending fetches"]
-  Fetch["GET /chunk/{n} …\nbackend uses startByte + frameCount"]
+  Fetch["GET /chunk/{n} …\nbackend uses startSec + encodeEndSec"]
   Decode["Decode to PCM ring\nplace at chunk.startSec"]
   Play["Resume scheduler at t"]
 
@@ -268,7 +262,7 @@ Base: `http://127.0.0.1:{port}`.
 2. `audioId` — short opaque id from extension (e.g. `a7f3c2e1`)
 3. `chunkIndex` — integer in the URL path
 
-No paths. No cache keys. No URL encoding.
+No paths. No URL encoding.
 
 ```js
 // Webview fetch pattern
@@ -295,9 +289,9 @@ resolveAudioId(audioId: string): string // → fsPath or throw 404
 **Backend contract** — on each webview request:
 
 1. Read `audioId` query param → lookup `fsPath` in registry
-2. Compute **cache directory name** `{fileStem}_{sourceExt}_{hash}` (never sent to client)
-3. For `/index`: load frame-derived `index.json` (or generate once), return manifest
-4. For `/chunk/{n}`: read or generate `{cacheDirName}/chunk_{n}.ogg`, stream bytes
+2. Compute **stream key** from file metadata and encode settings (never sent to client)
+3. For `/index`: load frame-derived manifest from LRU (or build once), return JSON
+4. For `/chunk/{n}`: transcode chunk on the fly via FFmpeg stdout, stream bytes
 
 `**audioId` format:** UUID v4 or short random string (e.g. 8–12 hex chars). Opaque to the frontend.
 
@@ -326,7 +320,7 @@ resolveAudioId(audioId: string): string // → fsPath or throw 404
 }
 ```
 
-Client-facing manifest has **no** `cacheKey` or source path. Chunk URLs are always `{serverUrl}/chunk/{index}?audioId={id}`.
+Client-facing manifest has **no** source path. Chunk URLs are always `{serverUrl}/chunk/{index}?audioId={id}`.
 
 Notes:
 
@@ -337,7 +331,7 @@ Notes:
 
 - `GET /chunk/{index}?audioId={id}`
 - Response: encoded bytes (`audio/ogg` or `audio/flac`)
-- Backend resolves cache internally; client just requests the next index number
+- Backend resolves path internally; client just requests the next index number
 
 ### Open media (VS Code tab → extension host)
 
@@ -362,10 +356,10 @@ The webview does **not** initiate open-media or registration. It only sends `{ t
 | ------------------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------- |
 | Open media tab                       | Extension                              | `registerAudio` → post `serverUrl` + `audioId` to webview                          |
 | Fetch index                          | Webview `GET /index?audioId=…`         | Backend lookup → read frame-derived index (or build once) → manifest                |
-| Play / buffer                        | Webview `GET /chunk/{i}?audioId=…`     | Backend lookup → cache hit/miss → bytes                                            |
-| Close / replace tab                  | Extension `dispose`                    | `unregisterAudio(audioId)`; abort webview fetches; **disk cache** retained         |
-| Same file reopened (same server run) | Extension                              | New `registerAudio` → new `audioId`; on-disk chunks reused via same `cacheDirName` |
-| Server stops or restarts             | `PlaybackServer.dispose()` / `start()` | Full `stream/` wipe; next play re-probes and re-transcodes                         |
+| Play / buffer                        | Webview `GET /chunk/{i}?audioId=…`     | Backend lookup → transcode → bytes                                            |
+| Close / replace tab                  | Extension `dispose`                    | `unregisterAudio(audioId)`; abort webview fetches; in-memory index retained         |
+| Same file reopened (same server run) | Extension                              | New `registerAudio` → new `audioId`; index LRU hit via same stream key |
+| Server stops or restarts             | `PlaybackServer.dispose()` / `start()` | `clearStreamIndexCache()`; next play re-probes frame scan                         |
 
 
 ### `loadMedia` message (extension → webview)
@@ -422,7 +416,7 @@ src/playback/
     registry.ts
     registrar.ts
     routes.ts
-    chunkPlanner.ts, ffmpegChunk.ts, probe.ts, cache.ts, chunk.ts, indexBuilder.ts, resolve.ts
+    chunkPlanner.ts, ffmpegChunk.ts, probe.ts, streamKey.ts, chunk.ts, indexBuilder.ts, resolve.ts
 ```
 
 Extension wiring: `src/playerPanel/` — `createPlayerSession()` returns `WebviewPlayerSession`. See [frontend.md](frontend.md) for the player tree.
@@ -439,126 +433,52 @@ Extension wiring: `src/playerPanel/` — `createPlayerSession()` returns `Webvie
 2. Server generates new `audioId`, stores `{ fsPath, registeredAt }` in registry.
 3. Returns `audioId` to extension for `loadMedia`.
 
-Re-opening the **same file** gets a **new** `audioId` (per tab / per open). Disk chunk cache is still shared via the same **cache directory name** derived from `fsPath`.
+Re-opening the **same file** gets a **new** `audioId` (per tab / per open). In-memory index manifests are shared via the same **stream key** derived from `fsPath` and encode settings.
 
-### Streaming disk cache (human-readable dirs)
+### In-memory index memoization
 
-Same root as today:
+The backend never writes stream data to disk. Frame scan results are stored in a bounded LRU map keyed by a SHA-256 hash of source path, file metadata, and encode settings.
 
-```
-{globalStorage}/stream/
-```
-
-Naming helpers live in `cache.ts` (moved from deleted `transcode.ts`): `sanitizeFileStem`, `sanitizeSourceExt`, max 80 chars per segment. **One directory** per source:
+**Stream key** (`streamKey.ts`):
 
 ```
-stream/
-  My_Song_flac_{hash}/
-    index.json
-    chunk_0.ogg
-    chunk_1.ogg
-    …
-    temp_chunk_42.ogg      # during transcode, then rename
+${fsPath}\0${mtimeMs}\0${size}\0${format}\0${oggQuality}\0${chunkDurationSec}\0${crossfadeMs}
 ```
 
-**Cache directory name** (human-readable prefix — same `{stem}_{ext}_{hash}` pattern the old flat files used, now a directory):
+Changing source file, encode settings, or chunk duration → new key → new index entry.
 
-```
-{fileStem}_{sourceExt}_{hash}/
-```
+**Index LRU:** default capacity 64 entries (`playback.maxIndexEntries`). On `PlaybackServer.start()` and `dispose()`, `clearStreamIndexCache()` empties the map. Frame scan cost is paid once per source per server session (until evicted).
 
-
-| Part        | Source                         | Example         |
-| ----------- | ------------------------------ | --------------- |
-| `fileStem`  | Sanitized basename without ext | `My_Song`       |
-| `sourceExt` | Sanitized source extension     | `flac`          |
-| `hash`      | sha256 hex (see below)         | `a1b2c3d4e5f6…` |
-
-
-**Hash payload** — replaces old `computeTranscodeHash`; adds chunk duration:
-
-```
-${fsPath}\0${mtimeMs}\0${size}\0${format}\0${oggQuality}\0${chunkDurationSec}
-```
-
-Changing source file, encode settings, or chunk duration → new hash → new directory.
-
-**Cache lifecycle:** on every playback server **start and stop**, **wipe the entire `stream/` directory** (all chunk dirs, `index.json` files, and any leftover legacy flat files). Cache is only reused while the server process is running; stopping or restarting the server clears disk cache and forces re-probe and re-transcode on next fetch.
-
-**Chunk files** inside the directory:
-
-```
-chunk_{index}.{ogg|flac}     # index = 0, 1, 2, …
-temp_chunk_{index}.{ext}     # atomic write pattern (like today's temp_ prefix)
-```
-
-**Example** (ogg, 1 s chunks, 248 s track):
-
-```
-~/.vscode/globalStorage/…/stream/My_Song_flac_a1b2…/
-  index.json
-  chunk_0.ogg
-  chunk_1.ogg
-  …
-  chunk_247.ogg
-```
-
-**Layout** (only format — no legacy flat files):
-
-```
-stream/
-  My_Song_flac_{hash}/
-    index.json
-    chunk_0.ogg
-    chunk_1.ogg
-```
-
-### Server lifecycle cleanup
-
-When `PlaybackServer.start()` or `PlaybackServer.dispose()` runs (sync `cleanStreamCacheDir()` — completes before `dispose()` returns):
-
-1. Delete **everything** under `{globalStorage}/stream/` — chunk directories, `index.json`, and any orphaned files.
-2. Recreate empty `stream/`.
-
-Not a legacy-only sweep; the stream directory is **always empty** while the server is not running, and at server start. Chunks written during an active session are reused until the server stops or restarts.
+**Chunk generation:** each `/chunk/{n}` request spawns FFmpeg with output `pipe:1`, collects stdout into a `Buffer`, and returns it. No chunk files are written or read. `chunkInFlight` dedupes concurrent requests for the same chunk; `runSerialTranscode` serializes FFmpeg work.
 
 ### Index creation (frame scan first)
 
 1. Read `audioId` query param → lookup `fsPath` in registry.
-2. Compute `cacheDirName` = `{fileStem}_{sourceExt}_{hash}` via `cache.ts`.
-3. If `{transcodeDir}/{cacheDirName}/index.json` exists and is valid → return it.
+2. Compute stream key via `computeStreamKey(fsPath)` in `streamKey.ts`.
+3. If index LRU has an entry for that key → return manifest.
 4. Else scan audio frames once (ffprobe packet/frame listing), collecting frame index, `pts_time`, and byte position.
 5. Infer chunk boundaries with target length ~1.0 s by snapping to nearest valid frame boundary.
-6. Build manifest with per-chunk `{startSec, endSec, startByte, endByte, startFrame, endFrame}`, write `index.json`, return JSON.
+6. Build manifest with per-chunk `{startSec, endSec, startByte, endByte, startFrame, endFrame}`, store in LRU, return JSON.
 
-Target: index ready quickly after open; frame scan cost is paid once per source and then reused.
+Target: index ready quickly after open; frame scan cost is paid once per source per session (until LRU eviction).
 
 ### Chunk generation
 
-**v1 strategy: on-demand FFmpeg slice using byte seek + frame count from index** (required for late scrub — chunk 120 must not decode 120 s first):
+**Strategy: on-demand FFmpeg slice using time seek from index**, output to stdout:
 
 ```bash
 ffmpeg -nostats -loglevel quiet \
-  -byte_seek 1 -ss {startByte}B -i {input} \
-  -frames:a {frameCount} \
-  -vn -c:a libopus -b:a 128k -f ogg pipe:1
+  -accurate_seek -ss {startSec} -to {encodeEndSec} -i {input} \
+  -vn -c:a libvorbis -q:a {oggQuality} -f ogg pipe:1
 ```
 
-| Flag / order | Why |
-|--------------|-----|
-| `-byte_seek 1` + `-ss {startByte}B` | Start decode from indexed physical byte position instead of time seek |
-| `-frames:a {frameCount}` | Hard output cutoff by frame count; does not rely on `-t` timing behavior |
-| `-f ogg pipe:1` | Stream chunk bytes directly for HTTP response without temp output target requirement |
+Implemented in `stream/ffmpegChunk.ts` (`transcodeChunkToBuffer`).
 
-Implemented in `stream/ffmpegChunk.ts` (`transcodeChunk`).
+- `startSec`, `encodeEndSec` (crossfade tail) come from the index chunk map
+- FFmpeg stdout is collected into a `Buffer` and returned directly — no temp files
+- Each request transcodes fresh; `chunkInFlight` coalesces duplicate concurrent requests
 
 **Join policy (v1):** use **mandatory micro-crossfade** in the scheduler at chunk boundaries (default 5 ms, configurable 2-10 ms) to mask splice discontinuities from independently encoded chunk files.
-
-- `startByte`, `startFrame`, `endFrame` come from `index.json` chunk map
-- `frameCount = endFrame - startFrame + 1`
-- `startSec`, `endSec` remain metadata for seek mapping and scheduler timing
-- Write to: `{transcodeDir}/{cacheDirName}/chunk_{index}.ogg`
-- If file exists, stream from disk (cache hit)
 
 **v2 optimization:** background prefetch on host: after chunk `i` is requested, optionally warm remaining chunks in the current buffer window without blocking the HTTP response.
 
@@ -568,7 +488,7 @@ Implemented in `stream/ffmpegChunk.ts` (`transcodeChunk`).
 
 - Webview: one chunk HTTP fetch at a time (sequential low-to-high within the buffer window).
 - Server: one FFmpeg transcode at a time via a serial mutex; `chunkInFlight` dedupes duplicate requests for the same chunk.
-- Multiple tabs on the same file may have different `audioId`s but share disk cache via the same `cacheDirName`.
+- Multiple tabs on the same file may have different `audioId`s but share the in-memory index via the same stream key.
 
 ### Config additions
 
@@ -623,11 +543,11 @@ Every legacy playback artifact is **deleted or rewritten** — not deprecated be
 
 #### Extract then delete
 
-From `transcode.ts` → `cache.ts`:
+From `transcode.ts` → `streamKey.ts`:
 
-- `sanitizeFileStem`, `sanitizeSourceExt`, `getTranscodeDir` (rename `getStreamCacheDir`)
-- `computeTranscodeHash` → `computeStreamCacheHash` (add `chunkDurationSec` to payload)
-- `cleanStreamCacheDir()` — sync; called from `PlaybackServer.start()` and `dispose()`; deletes and recreates entire `stream/`
+- `computeTranscodeHash` → `computeStreamCacheHash` (add `chunkDurationSec`, `crossfadeMs` to payload)
+- `computeStreamKey(fsPath)` — stat + hash; replaces cache directory naming
+- `clearStreamIndexCache()` — called from `PlaybackServer.start()` and `dispose()`; empties in-memory index LRU
 
 From `audioEngine.js` → `streamingAudioEngine.js`:
 
@@ -642,7 +562,7 @@ From `audioEngine.js` → `streamingAudioEngine.js`:
 | `playbackService.ts`     | Server lifecycle                                              |
 | `mediaEditorProvider.ts` | Tab open → `loadMedia` (caller unchanged)                     |
 | `src/ffmpegHost.ts`      | `checkFfmpegAvailable`, host notifications                    |
-| `stream/ffmpegChunk.ts` | Per-chunk transcode (`transcodeChunk`)              |
+| `stream/ffmpegChunk.ts` | Per-chunk transcode (`transcodeChunkToBuffer`, stdout → Buffer) |
 | `config.ts`              | `playback.format`, `playback.oggQuality` + new chunk settings |
 
 
@@ -711,27 +631,27 @@ sequenceDiagram
 
   Tab->>Ext: resolveCustomEditor(uri)
   Ext->>Srv: registerAudio(fsPath)
-  Srv->>FF: frame scan (if uncached index)
+  Srv->>FF: frame scan (if index LRU miss)
   FF-->>Srv: frame index, pts_time, byte positions
-  Srv->>Srv: infer ~1s chunks, write index.json
+  Srv->>Srv: infer ~1s chunks, store in LRU
   Srv-->>Ext: audioId
   Ext->>UI: postMessage loadMedia(serverUrl, audioId)
 
   UI->>Srv: GET /index?audioId=…
-  Srv->>Srv: lookup audioId → fsPath, read index.json
+  Srv->>Srv: lookup audioId → fsPath, LRU get index
   Srv-->>UI: manifest JSON (chunk map)
 
   UI->>Srv: GET /chunk/0?audioId=…
-  Srv->>Srv: chunk 0: startByte, frameCount
-  Srv->>FF: -byte_seek 1 -ss {startByte}B -frames:a {frameCount}
+  Srv->>Srv: chunk 0: startSec, encodeEndSec
+  Srv->>FF: -ss {startSec} -to {encodeEndSec} pipe:1
   FF-->>Srv: ogg bytes
   Srv-->>UI: audio/ogg chunk
   UI->>UI: decode → PCM → schedule play
 
   Note over UI,Srv: On seek to t=120s
   UI->>Srv: GET /chunk/{n} where startSec <= t < endSec
-  Srv->>FF: byte seek + frame count from index (if uncached)
-  Srv-->>UI: cached or fresh chunk
+  Srv->>FF: time seek from index
+  Srv-->>UI: fresh chunk bytes
 
   Note over Ext,Srv: On tab close
   Ext->>Srv: unregisterAudio(audioId)
@@ -747,19 +667,19 @@ Single pass — ship only when legacy paths are gone.
 
 ### Planning (this doc)
 
-- Goals, API, cache layout — this file; buffer policy and schedulers — [frontend.md](frontend.md)
+- Goals, API, index memoization — this file; buffer policy and schedulers — [frontend.md](frontend.md)
 - Chunk strategy: **frame-aligned ~1 s chunks inferred from scanned frame times**; `chunkBufferCount`: **5**
 - Stream-only: **no legacy code paths**
 - Ogg vs FLAC default for streaming
 
 ### Backend
 
-- `audioRegistry.ts`, `probe.ts`, `cache.ts`, `resolve.ts`, `indexBuilder.ts`, `chunk.ts`
+- `audioRegistry.ts`, `probe.ts`, `streamKey.ts`, `resolve.ts`, `indexBuilder.ts`, `chunk.ts`
 - `playbackServer.ts` — `/index`, `/chunk/:n`, `registerAudio`, `unregisterAudio`
 - **Delete** `preparePlayback`, `GET /audio`, `preparedFilePath`, `PlaybackResult`
 - **Delete** `transcode.ts`; **delete** `ffmpeg.transcodeForPlayback`
-- Add `stream/ffmpegChunk.transcodeChunk` (segment slice)
-- Sync `cleanStreamCacheDir()` on `PlaybackServer.start()` and `dispose()` — wipe entire `stream/`
+- Add `stream/ffmpegChunk.transcodeChunkToBuffer` (stdout → Buffer)
+- `clearStreamIndexCache()` on `PlaybackServer.start()` and `dispose()`
 - Manual test: register → `curl '…/index?audioId=…'` → `curl '…/chunk/0?audioId=…'`
 
 ### Extension + webview
@@ -785,10 +705,9 @@ Single pass — ship only when legacy paths are gone.
 | --------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------- |
 | Chunk duration        | **~1 s target, frame-aligned**                         | Matches real frame timing while keeping seek/scrub responsive               |
 | Open media trigger    | **VS Code editor tab**                                 | Extension registers file → posts `serverUrl` + `audioId`                   |
-| API shape             | `**/index` + `/chunk/{n}` + `?audioId=`**              | Clean URLs; backend owns path lookup and disk cache                        |
+| API shape             | `**/index` + `/chunk/{n}` + `?audioId=`**              | Clean URLs; backend owns path lookup and in-memory index                   |
 | Audio identity        | `**audioId` registry**                                 | Extension registers path; webview only sees opaque id                      |
-| Cache dir naming      | `**{fileStem}_{sourceExt}_{hash}/`**                   | Human-readable; hash includes chunking strategy and target duration          |
-| Cache lifetime        | **Session-scoped (server process)**                    | Full `stream/` wipe on server start and stop; reuse only while server runs |
+| Index memoization     | **Bounded LRU (session-scoped)**                        | Frame scan paid once per source per server run; cleared on start/dispose     |
 | Playback buffer       | `**chunkBufferCount`** (default 5)                     | Includes current chunk; playing 10 → hold 10–14                            |
 | Playback              | **Stream only (full refactor)**                        | Delete legacy modules; no dual paths                                       |
 | Chunk encoding        | **Same as today** (ogg/flac)                           | Reuse FFmpeg settings; webview decodes with `decodeAudioData`              |
@@ -797,7 +716,7 @@ Single pass — ship only when legacy paths are gone.
 | Probe tool            | **ffprobe**                                            | Accurate duration; falls back to ffmpeg stderr parse                       |
 | PCM output            | **Float32, interleaved channels in ring**              | Matches `AudioBuffer` channel layout                                       |
 | Scheduler             | **Option B** — `WorkletScheduler` + `AudioWorklet` ring | One output node; pull-based clock; CSP validated in webview |
-| Chunk FFmpeg          | **`-byte_seek 1`, `-ss {startByte}B`, `-frames:a {frameCount}`** | Byte-accurate chunk entry + frame-count bounded chunk exit               |
+| Chunk FFmpeg          | **`-accurate_seek`, `-ss {startSec}`, `-to {encodeEndSec}`, `pipe:1`** | Time seek + stdout capture; no disk writes                               |
 | Chunk join strategy   | **Always-on 5 ms crossfade**                           | Masks splice pops from independently encoded chunks                        |
 
 
@@ -808,7 +727,7 @@ Single pass — ship only when legacy paths are gone.
 
 | Risk                                       | Mitigation                                                                                          |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| Rapid scrubbing spawns many FFmpeg jobs    | Per-chunk promise dedupe + global concurrency cap; 1 s chunks mean finer-grained cache hits on seek |
+| Rapid scrubbing spawns many FFmpeg jobs    | Per-chunk promise dedupe + serial transcode mutex; 1 s chunks keep seek responsive |
 | Chunk boundary clicks/pops                 | Byte/frame-bounded chunk cuts + always-on 5 ms crossfade; tune 2-10 ms if needed                    |
 | Slow seek on late chunks                   | Use indexed byte seek (`-byte_seek 1`, `-ss {startByte}B`) to avoid linear time-based decode paths  |
 | VS Code webview CSP blocks localhost       | Already fetching `127.0.0.1` today — keep same pattern                                              |
@@ -836,8 +755,8 @@ Single pass — ship only when legacy paths are gone.
 - Index without full-file transcode; playable within **~1–3 s** of tab open (probe + first chunk + decode)
 - Seek fetches **O(1)** chunks, not whole file
 - Webview memory **bounded** by `chunkBufferCount` window
-- Same server run: reopened file reuses `{cacheDirName}/chunk_`* without re-encoding
-- Server start/stop: `stream/` is empty when server is not running; no stale chunk dirs or legacy files left
+- Same server run: reopened file hits index LRU via same stream key (no re-scan until eviction)
+- Server start/stop: in-memory index LRU cleared; no files written under `globalStorage/stream/`
 
 ---
 

@@ -10,7 +10,7 @@ Extension: `src/playerPanel/playerSession.ts` via `createPlayerSession()`.
 
 **Streaming stack** — `StreamingAudioEngine` (chunked HTTP → PCM → Web Audio Option B).
 
-**Related:** [Streaming playback architecture](stream.md) (backend, stream API, cache, end-to-end sequence).
+**Related:** [Streaming playback architecture](stream.md) (backend, stream API, end-to-end sequence).
 
 ---
 

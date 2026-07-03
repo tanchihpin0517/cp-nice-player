@@ -5,14 +5,12 @@ export class PlaybackService implements vscode.Disposable {
 	private server: PlaybackServer | undefined;
 	private started = false;
 
-	constructor(private readonly context: vscode.ExtensionContext) {}
-
 	async ensureStarted(): Promise<void> {
 		if (this.started) {
 			return;
 		}
 
-		this.server = new PlaybackServer(this.context);
+		this.server = new PlaybackServer();
 		await this.server.start();
 		this.started = true;
 	}

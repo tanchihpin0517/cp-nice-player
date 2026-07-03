@@ -1,13 +1,9 @@
 import * as assert from 'assert';
-import * as vscode from 'vscode';
 import { createRouteHandlers, matchRoute } from '../playback/stream/routes';
 import { Registry } from '../playback/stream/registry';
 
 suite('Route matching', () => {
-	const handlers = createRouteHandlers(
-		new Registry(),
-		{} as unknown as vscode.ExtensionContext,
-	);
+	const handlers = createRouteHandlers(new Registry());
 
 	test('matches /index exactly', () => {
 		assert.ok(matchRoute(handlers, '/index'));

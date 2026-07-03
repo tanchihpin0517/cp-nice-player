@@ -39,7 +39,6 @@ export class MediaEditorProvider implements vscode.CustomReadonlyEditorProvider<
 		const resourceRoots = getResourceRoots(
 			this.context.extensionUri,
 			document.uri,
-			this.context,
 		);
 		webviewPanel.webview.options = {
 			enableScripts: true,
