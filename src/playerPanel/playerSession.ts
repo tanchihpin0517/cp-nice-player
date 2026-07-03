@@ -178,6 +178,12 @@ export class WebviewPlayerSession implements PlayerSession {
 		const lruMapUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.extensionUri, 'media', 'engine', 'lruMap.js'),
 		);
+		const chunkUtilsUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'media', 'engine', 'chunkUtils.js'),
+		);
+		const crossfadeUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'media', 'engine', 'crossfade.js'),
+		);
 		const workletProcessorUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.extensionUri, 'media', 'engine', 'pcmWorkletProcessor.js'),
 		);
@@ -187,6 +193,9 @@ export class WebviewPlayerSession implements PlayerSession {
 		const scriptUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.extensionUri, 'media', 'player', 'player.js'),
 		);
+		const formatUtilsUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'media', 'player', 'formatUtils.js'),
+		);
 
 		this.panel.webview.html = template
 			.replaceAll('{{cspSource}}', webview.cspSource)
@@ -194,8 +203,11 @@ export class WebviewPlayerSession implements PlayerSession {
 			.replaceAll('{{pcmRingUri}}', pcmRingUri.toString())
 			.replaceAll('{{workletSchedulerUri}}', workletSchedulerUri.toString())
 			.replaceAll('{{lruMapUri}}', lruMapUri.toString())
+			.replaceAll('{{chunkUtilsUri}}', chunkUtilsUri.toString())
+			.replaceAll('{{crossfadeUri}}', crossfadeUri.toString())
 			.replaceAll('{{workletProcessorUri}}', workletProcessorUri.toString())
 			.replaceAll('{{engineScriptUri}}', engineScriptUri.toString())
+			.replaceAll('{{formatUtilsUri}}', formatUtilsUri.toString())
 			.replaceAll('{{scriptUri}}', scriptUri.toString());
 	}
 }

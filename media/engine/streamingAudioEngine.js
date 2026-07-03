@@ -1,119 +1,3 @@
-function chunkIndexForTime(manifest, timeSec) {
-  const chunks = manifest?.chunking?.chunks;
-  if (!Array.isArray(chunks) || chunks.length === 0) {
-    return 0;
-  }
-  const target = Math.max(0, timeSec);
-  for (let i = chunks.length - 1; i >= 0; i -= 1) {
-    if (target >= chunks[i].startSec) {
-      return i;
-    }
-  }
-  return 0;
-}
-
-function chunkEntry(manifest, index) {
-  return manifest?.chunking?.chunks?.[index];
-}
-
-function formatChunkRanges(indices) {
-  if (!indices.length) {
-    return '—';
-  }
-  const sorted = [...indices].sort((a, b) => a - b);
-  const ranges = [];
-  let start = sorted[0];
-  let end = sorted[0];
-
-  for (let i = 1; i < sorted.length; i += 1) {
-    if (sorted[i] === end + 1) {
-      end = sorted[i];
-    } else {
-      ranges.push(start === end ? String(start) : start + '-' + end);
-      start = sorted[i];
-      end = sorted[i];
-    }
-  }
-  ranges.push(start === end ? String(start) : start + '-' + end);
-  return ranges.join(', ');
-}
-
-function audioBufferToPlanar(audioBuffer) {
-  const planar = [];
-  for (let ch = 0; ch < audioBuffer.numberOfChannels; ch += 1) {
-    planar.push(audioBuffer.getChannelData(ch));
-  }
-  return planar;
-}
-
-function buildLinearFade(overlapFrames) {
-  const fadeIn = new Float32Array(overlapFrames);
-  const fadeOut = new Float32Array(overlapFrames);
-  for (let i = 0; i < overlapFrames; i += 1) {
-    const t = (i + 0.5) / overlapFrames;
-    fadeIn[i] = t;
-    fadeOut[i] = 1 - t;
-  }
-  return { fadeIn, fadeOut };
-}
-
-function normalizedCrossCorrelation(tail, head, headStart, blendFrames) {
-  let dot = 0;
-  let tailEnergy = 0;
-  let headEnergy = 0;
-
-  for (let ch = 0; ch < tail.length; ch += 1) {
-    const tailCh = tail[ch];
-    const headCh = head[ch];
-    for (let i = 0; i < blendFrames; i += 1) {
-      const t = tailCh[i];
-      const h = headCh[headStart + i];
-      dot += t * h;
-      tailEnergy += t * t;
-      headEnergy += h * h;
-    }
-  }
-
-  const denom = Math.sqrt(tailEnergy * headEnergy);
-  if (denom <= 1e-12) {
-    return 0;
-  }
-  return dot / denom;
-}
-
-function findWsolaOffset(tail, head, blendFrames, searchRadius, baseOffset = 0) {
-  let bestOffset = 0;
-  let bestScore = -Infinity;
-
-  for (let offset = 0; offset <= searchRadius; offset += 1) {
-    const headStart = baseOffset + offset;
-    if (headStart + blendFrames > head[0].length) {
-      continue;
-    }
-    const score = normalizedCrossCorrelation(tail, head, headStart, blendFrames);
-    if (score > bestScore) {
-      bestScore = score;
-      bestOffset = offset;
-    }
-  }
-
-  return bestOffset;
-}
-
-function linearCrossfade(tail, head, headStart, blendFrames, fadeIn, fadeOut) {
-  const blended = [];
-  for (let ch = 0; ch < tail.length; ch += 1) {
-    const out = new Float32Array(blendFrames);
-    const tailCh = tail[ch];
-    const headCh = head[ch];
-    for (let i = 0; i < blendFrames; i += 1) {
-      out[i] = tailCh[i] * fadeOut[i] + headCh[headStart + i] * fadeIn[i];
-    }
-    blended.push(out);
-  }
-  return blended;
-}
-
 const FETCH_INTERVAL_MS = 200;
 const TIME_UPDATE_INTERVAL_MS = 200;
 const DECODE_IDLE_MS = 200;
@@ -984,4 +868,8 @@ class StreamingAudioEngine extends EventTarget {
   }
 }
 
-window.StreamingAudioEngine = StreamingAudioEngine;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { StreamingAudioEngine };
+} else if (typeof window !== 'undefined') {
+  window.StreamingAudioEngine = StreamingAudioEngine;
+}

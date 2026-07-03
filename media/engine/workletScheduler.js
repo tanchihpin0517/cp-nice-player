@@ -26,12 +26,19 @@ class WorkletScheduler {
   }
 
   async _loadWorkletModule(ctx, moduleUrl) {
-    const response = await fetch(moduleUrl);
-    if (!response.ok) {
-      throw new Error(`Worklet fetch failed (${response.status}) for ${moduleUrl}`);
+    const readerUrl = moduleUrl.replace(/pcmWorkletProcessor\.js$/, 'pcmRingReader.js');
+    const [readerResponse, processorResponse] = await Promise.all([
+      fetch(readerUrl),
+      fetch(moduleUrl),
+    ]);
+    if (!readerResponse.ok) {
+      throw new Error(`Worklet fetch failed (${readerResponse.status}) for ${readerUrl}`);
+    }
+    if (!processorResponse.ok) {
+      throw new Error(`Worklet fetch failed (${processorResponse.status}) for ${moduleUrl}`);
     }
 
-    const source = await response.text();
+    const source = `${await readerResponse.text()}\n${await processorResponse.text()}`;
     const blob = new Blob([source], { type: 'application/javascript' });
     const blobUrl = URL.createObjectURL(blob);
     try {
@@ -234,4 +241,6 @@ class WorkletScheduler {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { WorkletScheduler };
+} else if (typeof window !== 'undefined') {
+  window.WorkletScheduler = WorkletScheduler;
 }
