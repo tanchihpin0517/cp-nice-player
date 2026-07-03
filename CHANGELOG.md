@@ -7,9 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-04
+
+### Added
+
+- Full test coverage for the playback backend (Mocha + `@vscode/test-cli`): playback server, stream index, chunk delivery, FFmpeg transcode, routing, and registration.
+- Frontend test suite (Vitest + jsdom) for `media/` engine modules, `StreamingAudioEngine`, `WorkletScheduler`, and `player.js` UI wiring.
+- Mocha tests for `WebviewPlayerSession` and `getResourceRoots`.
+- Pin-aware LRU for encoded chunk bytes in the webview (`maxEncodedChunks`); chunks in the active playhead window are never evicted.
+- FFmpeg encoder probing with automatic fallback to **mp3** or **wav** when the preferred ogg/flac encoder is unavailable.
+
 ### Changed
 
 - Removed the backend disk cache under `globalStorage/stream/`. Stream indexes are memoized in a bounded in-memory LRU for the playback server session; chunks are transcoded on the fly per request with no disk persistence.
+- Extracted testable webview modules: `chunkUtils.js`, `crossfade.js`, `pcmRingReader.js`, and `formatUtils.js`.
+- `npm test` runs Vitest (`test:media`) then extension-host tests (`test:extension`).
 
 ## [0.1.7] - 2026-07-04
 
@@ -138,6 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio only — video tracks in container files are not played.
 - Chunk cache is session-scoped and cleared when the playback server stops or restarts.
 
+[0.2.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.2.0
 [0.1.7]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.7
 [0.1.6]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.6
 [0.1.5]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.5

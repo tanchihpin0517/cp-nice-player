@@ -4,7 +4,7 @@ Webview playback for CP's Nice Player.
 
 | Player | Engine |
 |--------|--------|
-| `media/player/` (`player.html`, `player.js`, `player.css`) | `media/engine/` (`streamingAudioEngine.js`, worklet modules) |
+| `media/player/` (`player.html`, `player.js`, `player.css`, `formatUtils.js`) | `media/engine/` (`streamingAudioEngine.js`, `chunkUtils.js`, `crossfade.js`, `lruMap.js`, worklet modules) |
 
 Extension: `src/playerPanel/playerSession.ts` via `createPlayerSession()`.
 
@@ -473,3 +473,19 @@ idle → loadingIndex → ready → playing ⇄ paused
               ↓ seek
          loadingChunks(seekTarget) → ready/playing
 ```
+
+---
+
+## Tests
+
+Frontend code is covered by **Vitest + jsdom** under `src/test/media/`:
+
+| Area | Test files |
+| --- | --- |
+| Pure helpers | `lruMap`, `pcmRing`, `pcmRingReader`, `chunkUtils`, `crossfade`, `formatUtils` |
+| Engine (mocked fetch / Web Audio) | `streamingAudioEngine`, `workletScheduler` |
+| Player UI | `player` |
+
+The extension webview bridge (`src/playerPanel/`) is tested with Mocha in `src/test/playerPanel/`.
+
+Run `npm run test:media` for frontend tests only, or `npm test` for the full suite. Pure engine modules export via `module.exports` when loaded in Node; the webview loads the same files as browser globals.

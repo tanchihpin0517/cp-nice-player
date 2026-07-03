@@ -72,7 +72,25 @@ When you open a track:
 - **Audio only** — Video tracks are not played; only the audio stream is handled.
 - **VS Code only** — Streaming is served through VS Code's port forwarding to the extension's localhost server, not for external media players or standalone network deployment.
 
+## Development
+
+### Running tests
+
+`npm test` runs the full suite:
+
+| Command | What it runs |
+| --- | --- |
+| `npm test` | Vitest media tests, then Mocha extension-host tests |
+| `npm run test:media` | Vitest + jsdom — engine modules, `StreamingAudioEngine`, `WorkletScheduler`, player UI |
+| `npm run test:extension` | Mocha + `@vscode/test-cli` — playback backend and `playerPanel` bridge |
+
+FFmpeg on `PATH` is required for integration tests in the extension suite; suites skip automatically when FFmpeg is missing.
+
 ## Release notes
+
+### 0.2.0
+
+In-memory streaming only — no disk cache under `globalStorage/stream/`. Pin-aware LRU for encoded chunks in the webview. FFmpeg encoder fallback to mp3/wav when ogg/flac encoders are unavailable. Full backend and frontend test suites (`npm test`).
 
 ### 0.1.7
 
