@@ -2,11 +2,25 @@ import * as assert from 'assert';
 import {
 	codecForEncodeFormat,
 	contentTypeForEncodeFormat,
+	isEncodeFallback,
 	outputExtForEncodeFormat,
+	primaryEncodeFormat,
 	resolveEncodeFormat,
 } from '../encodeFormat';
 
 suite('Encode format resolution', () => {
+	test('primaryEncodeFormat maps playback preference to encode format', () => {
+		assert.strictEqual(primaryEncodeFormat('ogg'), 'ogg');
+		assert.strictEqual(primaryEncodeFormat('flac'), 'flac');
+	});
+
+	test('isEncodeFallback detects when resolved format differs from preference', () => {
+		assert.strictEqual(isEncodeFallback('ogg', 'ogg'), false);
+		assert.strictEqual(isEncodeFallback('ogg', 'mp3'), true);
+		assert.strictEqual(isEncodeFallback('flac', 'flac'), false);
+		assert.strictEqual(isEncodeFallback('flac', 'wav'), true);
+	});
+
 	test('uses ogg when libvorbis is available', () => {
 		assert.strictEqual(
 			resolveEncodeFormat('ogg', { libvorbis: true, libmp3lame: true, flac: true }),
@@ -43,10 +57,16 @@ suite('Encode format resolution', () => {
 	});
 
 	test('maps encode format to file extension and content type', () => {
+		assert.strictEqual(outputExtForEncodeFormat('ogg'), 'ogg');
+		assert.strictEqual(outputExtForEncodeFormat('flac'), 'flac');
 		assert.strictEqual(outputExtForEncodeFormat('mp3'), 'mp3');
 		assert.strictEqual(outputExtForEncodeFormat('wav'), 'wav');
+		assert.strictEqual(contentTypeForEncodeFormat('ogg'), 'audio/ogg');
+		assert.strictEqual(contentTypeForEncodeFormat('flac'), 'audio/flac');
 		assert.strictEqual(contentTypeForEncodeFormat('mp3'), 'audio/mpeg');
 		assert.strictEqual(contentTypeForEncodeFormat('wav'), 'audio/wav');
+		assert.strictEqual(codecForEncodeFormat('ogg'), 'libvorbis');
+		assert.strictEqual(codecForEncodeFormat('flac'), 'flac');
 		assert.strictEqual(codecForEncodeFormat('mp3'), 'libmp3lame');
 		assert.strictEqual(codecForEncodeFormat('wav'), 'pcm_s16le');
 	});

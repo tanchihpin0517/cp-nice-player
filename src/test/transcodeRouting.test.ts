@@ -149,4 +149,34 @@ suite('Transcode routing', () => {
 		assert.ok(template.includes('{endSec}'));
 		assert.ok(template.includes('-q:a 6'));
 	});
+
+	test('formatFfmpegChunkCommandTemplate single-quotes placeholder arguments', () => {
+		const template = formatFfmpegChunkCommandTemplate('/usr/bin/ffmpeg', {
+			format: 'ogg',
+			oggQuality: 6,
+		});
+
+		assert.ok(template.includes("'{input}'"));
+		assert.ok(template.includes("'{output}'"));
+		assert.ok(template.includes("'{startSec}'"));
+		assert.ok(template.includes("'{endSec}'"));
+	});
+
+	test('buildFfmpegChunkArgs clamps mp3 quality to 0-9', () => {
+		const high = buildFfmpegChunkArgs('/input.flac', '/out/chunk.mp3', {
+			startSec: 0,
+			endSec: 1,
+			format: 'mp3',
+			oggQuality: 99,
+		});
+		assert.strictEqual(high[high.indexOf('-q:a') + 1], '9');
+
+		const low = buildFfmpegChunkArgs('/input.flac', '/out/chunk.mp3', {
+			startSec: 0,
+			endSec: 1,
+			format: 'mp3',
+			oggQuality: -3,
+		});
+		assert.strictEqual(low[low.indexOf('-q:a') + 1], '0');
+	});
 });

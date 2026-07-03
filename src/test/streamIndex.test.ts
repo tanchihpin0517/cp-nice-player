@@ -1,9 +1,9 @@
 import * as assert from 'assert';
-import { isValidStreamIndexManifest } from '../playback/stream/indexBuilder';
+import { getChunkEntry, isValidStreamIndexManifest, StreamIndexManifest } from '../playback/stream/indexBuilder';
 
-function validManifest() {
+function validManifest(): StreamIndexManifest {
 	return {
-		version: 1,
+		version: 1 as const,
 		durationSec: 2.0,
 		channels: 2,
 		sampleRate: 44100,
@@ -16,7 +16,7 @@ function validManifest() {
 			targetDurationSec: 1,
 			crossfadeMs: 50,
 			count: 2,
-			strategy: 'frame-aligned',
+			strategy: 'frame-aligned' as const,
 			chunks: [
 				{
 					index: 0,
@@ -67,5 +67,22 @@ suite('Stream index manifest validation', () => {
 		manifest.chunking.chunks = [];
 		manifest.chunking.count = 0;
 		assert.strictEqual(isValidStreamIndexManifest(manifest), false);
+	});
+});
+
+suite('Stream index chunk lookup', () => {
+	test('getChunkEntry returns chunk at index', () => {
+		const manifest = validManifest();
+		const chunk = getChunkEntry(manifest, 0);
+
+		assert.deepStrictEqual(chunk, manifest.chunking.chunks[0]);
+	});
+
+	test('getChunkEntry throws on out-of-range index', () => {
+		const manifest = validManifest();
+		assert.throws(
+			() => getChunkEntry(manifest, 99),
+			/out of range/,
+		);
 	});
 });
