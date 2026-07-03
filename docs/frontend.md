@@ -434,9 +434,15 @@ Example: playing chunk **10**, `chunkBufferCount = 5` → chunks **10, 11, 12, 1
 
 At 1 s/chunk, `chunkBufferCount = 5` ≈ 5 s of audio from the playhead. ChunkLoader tops up the window as playback advances.
 
-**Behind playhead** (separate, not part of `chunkBufferCount`):
+**Encoded chunk LRU** (`maxEncodedChunks`, default **64**):
 
-- Keep **2 chunks** behind playhead in the PCM ring for quick rewind; evict older data.
+- Fetched chunk bytes (`ArrayBuffer`) are stored in a bounded LRU keyed by chunk index.
+- Chunks in the active pin window — `[playhead − 2 … playhead + chunkBufferCount − 1]` — are never evicted.
+- When over capacity, the oldest unpinned entry is removed. Seek-back within the cache avoids re-fetch; distant entries are evicted as the playhead moves.
+
+**Behind playhead** (pin window, not decoded PCM cache):
+
+- Keep **2 chunks** behind playhead in the encoded LRU pin window for quick rewind without re-fetch.
 
 **On seek:** cancel in-flight fetches, reset ring, fetch the seek chunk first, then fill `[playhead, playhead + chunkBufferCount − 1]`.
 

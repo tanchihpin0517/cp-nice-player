@@ -64,6 +64,7 @@ When you open a track:
 | `cp-nice-player.playback.crossfadeMs` | `20` | Per-chunk overlap tail length in milliseconds (`0`–`500`). Non-final chunks encode a short tail past the body boundary; the player crossfades it with the next chunk. Set to `0` to disable crossfade. |
 | `cp-nice-player.playback.chunkBufferCount` | `5` | Number of chunks to buffer ahead of the playhead, including the current chunk. At 1 s chunks, `5` ≈ 5 s of buffered audio. |
 | `cp-nice-player.playback.maxIndexEntries` | `64` | Maximum stream index manifests kept in memory for the playback server session (`1`–`256`). |
+| `cp-nice-player.playback.maxEncodedChunks` | `64` | Maximum encoded audio chunks kept in the webview LRU cache (`1`–`256`). |
 | `cp-nice-player.playback.debugLogging` | `false` | Log playback settings and transcode template at startup, plus per-request server activity, to the extension host console. |
 
 ## Known limitations

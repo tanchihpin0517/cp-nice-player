@@ -117,11 +117,14 @@ function updateDebugPanel() {
     renderDebugField('audioId', debugContext.audioId),
     renderDebugField('playbackFormat', debugContext.debug.playbackFormat),
     renderDebugField('chunkBufferCount', String(debugContext.debug.chunkBufferCount)),
+    renderDebugField('maxEncodedChunks', String(diag.maxEncodedChunks ?? debugContext.debug.maxEncodedChunks)),
+    renderDebugField('encoded chunks', diag.encodedChunkCount != null
+      ? diag.encodedChunkCount + ' cached (' + diag.bufferedChunks + ')'
+      : diag.bufferedChunks),
     renderDebugField('context', diag.contextState),
     renderDebugField('index.chunkCount', diag.manifestChunkCount != null ? String(diag.manifestChunkCount) : '—'),
     renderDebugField('audio', formatAudioLayout(diag)),
     renderDebugField('currentChunk', String(diag.currentChunkIndex)),
-    renderDebugField('buffered chunks', diag.bufferedChunks),
     renderDebugField('ring buffered', diag.ringFramesAvailable != null
       ? `${diag.ringFramesAvailable} frames (${diag.ringFreeFrames} free)`
       : '—'),
@@ -163,6 +166,7 @@ async function loadMediaMessage(message) {
       name: message.name,
       chunkBufferCount: message.debug.chunkBufferCount,
       chunkDurationSec: message.debug.chunkDurationSec,
+      maxEncodedChunks: message.debug.maxEncodedChunks,
     });
     trackState.textContent = 'Ready';
     setControlsEnabled(true);

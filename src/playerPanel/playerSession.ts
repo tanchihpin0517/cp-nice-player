@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import {
 	getChunkBufferCount,
 	getChunkDurationSec,
+	getMaxEncodedChunks,
 	getPlaybackOggQuality,
 } from '../config';
 import { EncodeFormat } from '../encodeFormat';
@@ -23,6 +24,7 @@ interface LoadMediaMessage {
 		playbackOggQuality: number;
 		chunkDurationSec: number;
 		chunkBufferCount: number;
+		maxEncodedChunks: number;
 	};
 }
 
@@ -149,6 +151,7 @@ export class WebviewPlayerSession implements PlayerSession {
 				playbackOggQuality: getPlaybackOggQuality(),
 				chunkDurationSec: getChunkDurationSec(),
 				chunkBufferCount: getChunkBufferCount(),
+				maxEncodedChunks: getMaxEncodedChunks(),
 			},
 		};
 
@@ -172,6 +175,9 @@ export class WebviewPlayerSession implements PlayerSession {
 		const workletSchedulerUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.extensionUri, 'media', 'engine', 'workletScheduler.js'),
 		);
+		const lruMapUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'media', 'engine', 'lruMap.js'),
+		);
 		const workletProcessorUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.extensionUri, 'media', 'engine', 'pcmWorkletProcessor.js'),
 		);
@@ -187,6 +193,7 @@ export class WebviewPlayerSession implements PlayerSession {
 			.replaceAll('{{styleUri}}', styleUri.toString())
 			.replaceAll('{{pcmRingUri}}', pcmRingUri.toString())
 			.replaceAll('{{workletSchedulerUri}}', workletSchedulerUri.toString())
+			.replaceAll('{{lruMapUri}}', lruMapUri.toString())
 			.replaceAll('{{workletProcessorUri}}', workletProcessorUri.toString())
 			.replaceAll('{{engineScriptUri}}', engineScriptUri.toString())
 			.replaceAll('{{scriptUri}}', scriptUri.toString());

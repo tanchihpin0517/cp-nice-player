@@ -119,6 +119,8 @@ const TIME_UPDATE_INTERVAL_MS = 200;
 const DECODE_IDLE_MS = 200;
 const INDEX_RETRY_INTERVAL_MS = 1000;
 const RING_HEADROOM_SEC = 5;
+const BEHIND_CHUNK_COUNT = 2;
+const DEFAULT_MAX_ENCODED_CHUNKS = 64;
 const WORKLET_MODULE_URL = document.querySelector('meta[name="cp-worklet-module-url"]')?.getAttribute('content') ?? '';
 
 class StreamingAudioEngine extends EventTarget {
@@ -132,10 +134,11 @@ class StreamingAudioEngine extends EventTarget {
     this.manifest = null;
     this.chunkBufferCount = 5;
     this.chunkDurationSec = 1;
+    this.maxEncodedChunks = DEFAULT_MAX_ENCODED_CHUNKS;
     this.loadGeneration = 0;
     this.indexFetchAbort = null;
     this.fetchAbortControllers = new Map();
-    this.encodedChunks = new Map();
+    this.encodedChunks = new LruMap(DEFAULT_MAX_ENCODED_CHUNKS);
     this.fetchInFlight = new Map();
     this.decodedChunks = new Set();
     this.pausedAt = 0;
@@ -165,6 +168,11 @@ class StreamingAudioEngine extends EventTarget {
     this.mediaName = options.name || '';
     this.chunkBufferCount = Math.max(1, Number(options.chunkBufferCount) || 5);
     this.chunkDurationSec = Math.max(0.5, Number(options.chunkDurationSec) || 1);
+    this.maxEncodedChunks = Math.max(
+      this.chunkBufferCount + BEHIND_CHUNK_COUNT,
+      Number(options.maxEncodedChunks) || DEFAULT_MAX_ENCODED_CHUNKS,
+    );
+    this.encodedChunks = new LruMap(this.maxEncodedChunks);
     this.pausedAt = 0;
     this._resetClockBases(0);
 
@@ -321,6 +329,8 @@ class StreamingAudioEngine extends EventTarget {
       serverUrl: this.serverUrl,
       audioId: this.audioId,
       chunkBufferCount: this.chunkBufferCount,
+      maxEncodedChunks: this.maxEncodedChunks,
+      encodedChunkCount: this.encodedChunks.size,
       currentChunkIndex: currentChunk,
       fetchInFlight: formatChunkRanges(fetchInFlight),
       decodedChunks: formatChunkRanges([...this.decodedChunks].sort((a, b) => a - b)),
@@ -449,6 +459,32 @@ class StreamingAudioEngine extends EventTarget {
     }
 
     return generation === this.loadGeneration;
+  }
+
+  _getPinnedChunkRange() {
+    const count = this.manifest?.chunking?.count ?? 0;
+    if (count === 0) {
+      return { min: 0, max: -1 };
+    }
+    const currentChunk = chunkIndexForTime(this.manifest, this.getCurrentTime());
+    return {
+      min: Math.max(0, currentChunk - BEHIND_CHUNK_COUNT),
+      max: Math.min(currentChunk + this.chunkBufferCount - 1, count - 1),
+    };
+  }
+
+  _isPinnedChunk(index) {
+    const { min, max } = this._getPinnedChunkRange();
+    return index >= min && index <= max;
+  }
+
+  _storeEncodedChunk(index, bytes) {
+    this.encodedChunks.set(index, bytes);
+    this._evictEncodedChunks();
+  }
+
+  _evictEncodedChunks() {
+    this.encodedChunks.evictWhileOverCapacity((key) => this._isPinnedChunk(key));
   }
 
   _getBufferWindow() {
@@ -590,6 +626,7 @@ class StreamingAudioEngine extends EventTarget {
       });
       break;
     }
+    this._evictEncodedChunks();
     this._updateBufferingState();
   }
 
@@ -720,7 +757,7 @@ class StreamingAudioEngine extends EventTarget {
           throw new DOMException('Aborted', 'AbortError');
         }
 
-        this.encodedChunks.set(index, bytes);
+        this._storeEncodedChunk(index, bytes);
         this._updateBufferingState();
         this._emit('chunkfinished', {
           chunkIndex: index,
