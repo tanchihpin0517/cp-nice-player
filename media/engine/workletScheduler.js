@@ -16,8 +16,13 @@ class WorkletScheduler {
     this.capacityFrames = 0;
     this.freeFrames = 0;
     this.underrunFrames = 0;
+    this.totalFramesWritten = 0;
     this.onStats = options.onStats ?? null;
     this._writeAckWaiters = [];
+  }
+
+  get framesConsumed() {
+    return this.totalFramesWritten - this.framesAvailable;
   }
 
   async _loadWorkletModule(ctx, moduleUrl) {
@@ -65,6 +70,7 @@ class WorkletScheduler {
       processorOptions: {
         channelCount,
         capacityFrames,
+        sampleRate,
       },
     });
 
@@ -114,6 +120,7 @@ class WorkletScheduler {
     this.framesAvailable = 0;
     this.freeFrames = this.capacityFrames;
     this.underrunFrames = 0;
+    this.totalFramesWritten = 0;
     this.workletNode?.port.postMessage({ type: 'reset' });
   }
 
@@ -168,6 +175,7 @@ class WorkletScheduler {
       }
 
       totalWritten += accepted;
+      this.totalFramesWritten += accepted;
       offset += accepted;
       remaining -= accepted;
     }

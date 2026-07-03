@@ -94,13 +94,20 @@ class PcmRingReader {
   }
 }
 
+const STATS_REPORT_HZ = 20;
+const STATS_REPORT_INTERVAL_SEC = 1 / STATS_REPORT_HZ;
+
 class PcmWorkletProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     const channelCount = options.processorOptions?.channelCount ?? 2;
     const capacityFrames = options.processorOptions?.capacityFrames ?? 480000;
+    const rate = options.processorOptions?.sampleRate ?? sampleRate;
     this.ring = new PcmRingReader(channelCount, capacityFrames);
-    this.reportIntervalFrames = options.processorOptions?.reportIntervalFrames ?? 48000;
+    this.reportIntervalFrames = Math.max(
+      1,
+      Math.round(rate * STATS_REPORT_INTERVAL_SEC),
+    );
     this.framesSinceReport = 0;
 
     this.port.onmessage = (event) => {

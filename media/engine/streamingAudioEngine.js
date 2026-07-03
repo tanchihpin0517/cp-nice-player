@@ -114,7 +114,8 @@ function linearCrossfade(tail, head, headStart, blendFrames, fadeIn, fadeOut) {
   return blended;
 }
 
-const LOOP_INTERVAL_MS = 200;
+const FETCH_INTERVAL_MS = 200;
+const TIME_UPDATE_INTERVAL_MS = 200;
 const DECODE_IDLE_MS = 200;
 const INDEX_RETRY_INTERVAL_MS = 1000;
 const RING_HEADROOM_SEC = 5;
@@ -139,6 +140,10 @@ class StreamingAudioEngine extends EventTarget {
     this.decodedChunks = new Set();
     this.pausedAt = 0;
     this.playbackAnchorCtxTime = 0;
+    this._clockBaseSec = 0;
+    this._clockBaseFrames = 0;
+    this._wsolaDroppedFrames = 0;
+    this._wsolaDroppedFramesBase = 0;
     this.isPlaying = false;
     this.volume = 1;
     this.muted = false;
@@ -161,6 +166,7 @@ class StreamingAudioEngine extends EventTarget {
     this.chunkBufferCount = Math.max(1, Number(options.chunkBufferCount) || 5);
     this.chunkDurationSec = Math.max(0.5, Number(options.chunkDurationSec) || 1);
     this.pausedAt = 0;
+    this._resetClockBases(0);
 
     this._emit('loading', { serverUrl, audioId });
 
@@ -200,6 +206,8 @@ class StreamingAudioEngine extends EventTarget {
     if (!resuming) {
       this.scheduler?.reset();
       this._clearCrossfadeTail();
+      this._resetClockBases(this.pausedAt);
+    } else if (!this.scheduler) {
       this.playbackAnchorCtxTime = this.ctx.currentTime;
     }
 
@@ -248,6 +256,7 @@ class StreamingAudioEngine extends EventTarget {
     this.decodedChunks.clear();
     this._clearCrossfadeTail();
     this.pausedAt = clamped;
+    this._resetClockBases(clamped);
     this.isPlaying = false;
     this._stopTimeTicker();
 
@@ -278,8 +287,16 @@ class StreamingAudioEngine extends EventTarget {
     if (!this.isPlaying) {
       return this.pausedAt;
     }
-    const elapsed = this.ctx.currentTime - this.playbackAnchorCtxTime;
-    return Math.min(Math.max(this.pausedAt + elapsed, 0), this.manifest.durationSec);
+    if (!this.scheduler) {
+      const elapsed = this.ctx.currentTime - this.playbackAnchorCtxTime;
+      return Math.min(Math.max(this.pausedAt + elapsed, 0), this.manifest.durationSec);
+    }
+
+    const { sampleRate } = this._manifestAudioLayout();
+    const outputFrames = this.scheduler.framesConsumed - this._clockBaseFrames;
+    const wsolaFrames = this._wsolaDroppedFrames - this._wsolaDroppedFramesBase;
+    const sourceSec = this._clockBaseSec + (outputFrames + wsolaFrames) / sampleRate;
+    return Math.min(Math.max(sourceSec, 0), this.manifest.durationSec);
   }
 
   getDuration() {
@@ -310,6 +327,9 @@ class StreamingAudioEngine extends EventTarget {
       ringFramesAvailable: this.scheduler?.framesAvailable ?? 0,
       ringFreeFrames: this.scheduler?.freeFrames ?? 0,
       underrunFrames: this.scheduler?.underrunFrames ?? 0,
+      framesConsumed: this.scheduler?.framesConsumed ?? 0,
+      totalFramesWritten: this.scheduler?.totalFramesWritten ?? 0,
+      wsolaDroppedFrames: this._wsolaDroppedFrames,
       manifestChunkCount: this.manifest?.chunking?.count,
       manifestCrossfadeMs: this.manifest?.chunking?.crossfadeMs,
       crossfadeTailHeld: this._crossfadeTail != null,
@@ -344,6 +364,13 @@ class StreamingAudioEngine extends EventTarget {
 
   _clearCrossfadeTail() {
     this._crossfadeTail = null;
+  }
+
+  _resetClockBases(sec) {
+    this._clockBaseSec = sec;
+    this._clockBaseFrames = this.scheduler?.framesConsumed ?? 0;
+    this._wsolaDroppedFrames = 0;
+    this._wsolaDroppedFramesBase = 0;
   }
 
   _chunkOverlapFrames(entry, index) {
@@ -455,8 +482,15 @@ class StreamingAudioEngine extends EventTarget {
       return;
     }
     const duration = this.manifest.durationSec;
-    if (this.getCurrentTime() < duration - 0.05) {
-      return;
+    const lastIndex = this.manifest.chunking.count - 1;
+    const allDecoded = this.decodedChunks.has(lastIndex);
+    const ringDrained = (this.scheduler?.framesAvailable ?? 0) === 0;
+    const structurallyComplete = allDecoded && ringDrained;
+
+    if (!structurallyComplete) {
+      if (this.getCurrentTime() < duration - 0.05) {
+        return;
+      }
     }
     if (this._hasPendingChunksToWrite()) {
       return;
@@ -769,6 +803,7 @@ class StreamingAudioEngine extends EventTarget {
             start,
           );
           const headStart = start + wsolaShiftSamples;
+          this._wsolaDroppedFrames += wsolaShiftSamples;
           const blended = linearCrossfade(
             this._crossfadeTail,
             planar,
@@ -864,7 +899,7 @@ class StreamingAudioEngine extends EventTarget {
     this._stopFetchLoop();
     this._fetchTimer = setInterval(() => {
       this._maintainEncodedWindow();
-    }, LOOP_INTERVAL_MS);
+    }, FETCH_INTERVAL_MS);
     this._maintainEncodedWindow();
   }
 
@@ -897,7 +932,7 @@ class StreamingAudioEngine extends EventTarget {
         currentTime: this.getCurrentTime(),
         duration: this.getDuration(),
       });
-    }, LOOP_INTERVAL_MS);
+    }, TIME_UPDATE_INTERVAL_MS);
   }
 
   _stopTimeTicker() {
