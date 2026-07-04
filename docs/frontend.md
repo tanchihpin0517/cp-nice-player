@@ -448,11 +448,17 @@ At 1 s/chunk, `chunkBufferCount = 5` ≈ 5 s of audio from the playhead. ChunkLo
 
 ### Decode chunk → PCM
 
-Each chunk is a **short encoded file** (complete Ogg/FLAC stream for that time range). Flow:
+Each chunk is a **short self-contained encoded file** for that time range (Ogg, MP3, FLAC, or WAV per manifest `encode.contentType`; see [Encode format resolution](stream.md#encode-format-resolution)). Flow:
 
 1. `fetch(\`${serverUrl}/chunk/${n}?audioId=${id})`→`ArrayBuffer`
 2. Decode to `AudioBuffer` (small — ~1 s × 48 kHz × 2 ch ≈ manageable)
 3. Copy channel data into ring at offset `chunk.startSec` from manifest (account for variable chunk duration and sample-accurate alignment in v2)
+
+**WSOLA alignment at chunk joins** (`crossfade.js` → `findWsolaOffset`):
+
+- Search **`±overlapFrames`** samples around the nominal head position (`baseOffset`, usually `0` at chunk seams).
+- Returns signed `wsolaShiftSamples`: **positive** = blend starts later (head prefix skipped, counted in `wsolaDroppedFrames`); **negative** = blend starts earlier in the chunk.
+- When `baseOffset = 0`, only `0 … +R` is valid (`headStart >= 0`); backward search applies when `baseOffset > 0`.
 
 **Gapless policy (v1):** fast seek + `nextPlayTime` scheduling + **always-on micro-crossfade** between adjacent decoded chunks.
 

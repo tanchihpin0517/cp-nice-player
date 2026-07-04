@@ -68,7 +68,7 @@ See **[Dataflow](#dataflow)** for diagrams. In short:
     ↓ extension scans audio frames on file open
 [index manifest — per-chunk start/end sec, byte, frame]  ← in-memory LRU, keyed by stream hash
     ↓ on demand per /chunk/{n} request
-[Chunk N] encoded segment (ogg)  ← FFmpeg time seek, stdout → Buffer (no disk)
+[Chunk N] encoded segment (ogg/mp3/flac/wav)  ← FFmpeg time seek, stdout → Buffer (no disk)
     ↓ per chunk in webview
 [PCM frames] → ring buffer → Web Audio scheduler
 ```
@@ -211,7 +211,7 @@ flowchart TD
   RESOLVE["Lookup audioId → fsPath\ncompute stream key"]
   INDEX["Read chunk n from index LRU\nstartSec · encodeEndSec"]
   FF["FFmpeg time seek\n-ss {startSec} -to {encodeEndSec}\npipe:1 → Buffer"]
-  RESP["HTTP 200\naudio/ogg body"]
+  RESP["HTTP 200\nencoded chunk body\n(manifest contentType)"]
 
   REQ --> RESOLVE --> INDEX --> FF --> RESP
 ```
@@ -252,7 +252,7 @@ Base: `http://127.0.0.1:{port}`.
 | —         | (internal)       | —              | Extension | `registerAudio(fsPath)` → `{ audioId }` |
 | —         | (internal)       | —              | Extension | `unregisterAudio(audioId)`              |
 | `GET`     | `/index`         | `audioId={id}` | Webview   | `application/json` manifest             |
-| `GET`     | `/chunk/{index}` | `audioId={id}` | Webview   | `audio/ogg` or `audio/flac` bytes       |
+| `GET`     | `/chunk/{index}` | `audioId={id}` | Webview   | Encoded chunk bytes (`Content-Type` from manifest `encode.contentType`: `audio/ogg`, `audio/flac`, `audio/mpeg`, or `audio/wav`) |
 | `OPTIONS` | `*`              | —              | Webview   | CORS preflight                          |
 
 
@@ -305,7 +305,7 @@ resolveAudioId(audioId: string): string // → fsPath or throw 404
   "sampleRate": 44100,
   "encode": {
     "format": "ogg",
-    "codec": "ogg",
+    "codec": "libvorbis",
     "contentType": "audio/ogg"
   },
   "chunking": {
@@ -325,12 +325,13 @@ Client-facing manifest has **no** source path. Chunk URLs are always `{serverUrl
 Notes:
 
 - `**initRequired: false`** for v1: each chunk is a **self-contained** encoded snippet decodable with `decodeAudioData` without a shared init segment.
+- `encode.*` reflects the **effective** encode format after FFmpeg encoder probing (see [Encode format resolution](#encode-format-resolution)), not necessarily the user’s `playback.format` preference. Examples when fallback applies: `{ "format": "mp3", "codec": "libmp3lame", "contentType": "audio/mpeg" }` or `{ "format": "wav", "codec": "pcm_s16le", "contentType": "audio/wav" }`.
 - Optional response headers on chunks: `X-Chunk-Index`, `X-Chunk-Start-Sec`, `X-Chunk-Duration-Sec`.
 
 ### Chunk resource
 
 - `GET /chunk/{index}?audioId={id}`
-- Response: encoded bytes (`audio/ogg` or `audio/flac`)
+- Response: encoded bytes; `Content-Type` matches manifest `encode.contentType`
 - Backend resolves path internally; client just requests the next index number
 
 ### Open media (VS Code tab → extension host)
@@ -372,13 +373,16 @@ The webview does **not** initiate open-media or registration. It only sends `{ t
   audioId: 'a7f3c2e1',
   debug: {
     fsPath: string,
-    playbackFormat: 'ogg' | 'flac',
+    playbackFormat: 'ogg' | 'mp3' | 'flac' | 'wav',  // effective encode format (see Encode format resolution)
     playbackOggQuality: number,
     chunkDurationSec: number,
     chunkBufferCount: number,
+    maxEncodedChunks: number,
   },
 }
 ```
+
+`debug.playbackFormat` is `getEffectiveEncodeFormat()` — the resolved runtime format, which may differ from the `playback.format` setting when FFmpeg lacks the preferred encoder.
 
 No `source`, `playbackUrl`, `transcodedFsPath`, or `transcodedFileName`.
 
@@ -409,14 +413,17 @@ Streaming backend under `src/playback/stream/`. Shared shell: `playbackServer.ts
 | `stream/` | `GET /index`, `GET /chunk/{n}` |
 
 ```
-src/playback/
-  playbackServer.ts       # CORS, listen, registry + route dispatch
-  playbackService.ts
-  stream/
-    registry.ts
-    registrar.ts
-    routes.ts
-    chunkPlanner.ts, ffmpegChunk.ts, probe.ts, streamKey.ts, chunk.ts, indexBuilder.ts, resolve.ts
+src/
+  encodeFormat.ts         # preference → effective encode format (fallback chain)
+  ffmpegHost.ts           # FFmpeg probe, encoder capabilities, getEffectiveEncodeFormat
+  playback/
+    playbackServer.ts     # CORS, listen, registry + route dispatch
+    playbackService.ts
+    stream/
+      registry.ts
+      registrar.ts
+      routes.ts
+      chunkPlanner.ts, ffmpegChunk.ts, probe.ts, streamKey.ts, chunk.ts, indexBuilder.ts, resolve.ts
 ```
 
 Extension wiring: `src/playerPanel/` — `createPlayerSession()` returns `WebviewPlayerSession`. See [frontend.md](frontend.md) for the player tree.
@@ -435,6 +442,30 @@ Extension wiring: `src/playerPanel/` — `createPlayerSession()` returns `Webvie
 
 Re-opening the **same file** gets a **new** `audioId` (per tab / per open). In-memory index manifests are shared via the same **stream key** derived from `fsPath` and encode settings.
 
+### Encode format resolution
+
+User setting `playback.format` is a **preference** (`ogg` or `flac`). At FFmpeg startup the extension probes installed encoders (`ffmpeg -encoders`) and resolves an **effective** encode format (`EncodeFormat`: `ogg` | `mp3` | `flac` | `wav`). Resolution lives in `src/encodeFormat.ts`; caching and probing in `src/ffmpegHost.ts`.
+
+| Preference (`playback.format`) | Primary (encoder available) | Fallback (encoder missing) |
+| ------------------------------ | ----------------------------- | -------------------------- |
+| `ogg` (default)                | `ogg` (libvorbis)             | `mp3` (libmp3lame)         |
+| `flac`                         | `flac`                        | `wav` (pcm_s16le)          |
+
+If preference is `ogg` and FFmpeg has **neither** libvorbis nor libmp3lame, playback is unavailable (FFmpeg marked unavailable with an error). There is no further fallback.
+
+**API:** `getEffectiveEncodeFormat()` returns the cached resolved format after probe, or the primary format optimistically before probe completes. Used for chunk transcoding, index manifest `encode.*`, stream cache key, and webview debug `playbackFormat`.
+
+**On config change:** when `playback.format` changes, `refreshEncodeFormatResolution()` re-runs resolution against the cached encoder list (no re-probe).
+
+**Logging:** when resolved format differs from preference, the extension host logs once:
+
+- `libvorbis unavailable; using mp3 for playback.`
+- `flac encoder unavailable; using wav for playback.`
+
+With `playback.debugLogging`, startup also logs `encode format resolved: preference=…, encodeFormat=…`.
+
+**Quality:** `playback.oggQuality` drives libvorbis `-q:a` for `ogg` and maps to libmp3lame `-q:a` when fallback is `mp3`.
+
 ### In-memory index memoization
 
 The backend never writes stream data to disk. Frame scan results are stored in a bounded LRU map keyed by a SHA-256 hash of source path, file metadata, and encode settings.
@@ -445,7 +476,9 @@ The backend never writes stream data to disk. Frame scan results are stored in a
 ${fsPath}\0${mtimeMs}\0${size}\0${format}\0${oggQuality}\0${chunkDurationSec}\0${crossfadeMs}
 ```
 
-Changing source file, encode settings, or chunk duration → new key → new index entry.
+`${format}` is the **effective** encode format (`getEffectiveEncodeFormat()`), not the raw `playback.format` preference — so a fallback to `mp3` or `wav` produces a distinct cache key from `ogg` or `flac`.
+
+Changing source file, encode settings, effective format, or chunk duration → new key → new index entry.
 
 **Index LRU:** default capacity 64 entries (`playback.maxIndexEntries`). On `PlaybackServer.start()` and `dispose()`, `clearStreamIndexCache()` empties the map. Frame scan cost is paid once per source per server session (until evicted).
 
@@ -464,15 +497,26 @@ Target: index ready quickly after open; frame scan cost is paid once per source 
 
 ### Chunk generation
 
-**Strategy: on-demand FFmpeg slice using time seek from index**, output to stdout:
+**Strategy: on-demand FFmpeg slice using time seek from index**, output to stdout (`pipe:1`). Implemented in `stream/ffmpegChunk.ts` (`transcodeChunkToBuffer`).
+
+Base args (all formats):
 
 ```bash
 ffmpeg -nostats -loglevel quiet \
   -accurate_seek -ss {startSec} -to {encodeEndSec} -i {input} \
-  -vn -c:a libvorbis -q:a {oggQuality} -f ogg pipe:1
+  -vn … pipe:1
 ```
 
-Implemented in `stream/ffmpegChunk.ts` (`transcodeChunkToBuffer`).
+Encode tail by effective format:
+
+| Format | FFmpeg encode args |
+| ------ | ------------------ |
+| `ogg`  | `-c:a libvorbis -q:a {oggQuality} -f ogg pipe:1` |
+| `mp3`  | `-c:a libmp3lame -q:a {mp3Quality} -f mp3 pipe:1` |
+| `flac` | `-c:a flac -f flac pipe:1` |
+| `wav`  | `-c:a pcm_s16le -f wav pipe:1` |
+
+(`mp3Quality` is derived from `playback.oggQuality`.)
 
 - `startSec`, `encodeEndSec` (crossfade tail) come from the index chunk map
 - FFmpeg stdout is collected into a `Buffer` and returned directly — no temp files
@@ -504,7 +548,7 @@ Implemented in `stream/ffmpegChunk.ts` (`transcodeChunkToBuffer`).
 
 `**chunkBufferCount**` — chunk count in the forward buffer, **including the current chunk**. Default **5** with frame-aligned ~1 s chunks (time window is approximately 5 s from the playhead).
 
-Keep existing `playback.format` and `playback.oggQuality`.
+Keep existing `playback.format` (preference: `ogg` | `flac`; see [Encode format resolution](#encode-format-resolution)) and `playback.oggQuality` (also drives mp3 quality when fallback is `mp3`).
 
 ### Full refactor inventory
 
@@ -561,7 +605,8 @@ From `audioEngine.js` → `streamingAudioEngine.js`:
 | ------------------------ | ------------------------------------------------------------- |
 | `playbackService.ts`     | Server lifecycle                                              |
 | `mediaEditorProvider.ts` | Tab open → `loadMedia` (caller unchanged)                     |
-| `src/ffmpegHost.ts`      | `checkFfmpegAvailable`, host notifications                    |
+| `src/ffmpegHost.ts`      | FFmpeg probe, encoder capabilities, `getEffectiveEncodeFormat`, host notifications |
+| `src/encodeFormat.ts`    | Preference → effective format resolution and fallback chain |
 | `stream/ffmpegChunk.ts` | Per-chunk transcode (`transcodeChunkToBuffer`, stdout → Buffer) |
 | `config.ts`              | `playback.format`, `playback.oggQuality` + new chunk settings |
 
@@ -644,8 +689,8 @@ sequenceDiagram
   UI->>Srv: GET /chunk/0?audioId=…
   Srv->>Srv: chunk 0: startSec, encodeEndSec
   Srv->>FF: -ss {startSec} -to {encodeEndSec} pipe:1
-  FF-->>Srv: ogg bytes
-  Srv-->>UI: audio/ogg chunk
+  FF-->>Srv: encoded bytes
+  Srv-->>UI: chunk (manifest contentType)
   UI->>UI: decode → PCM → schedule play
 
   Note over UI,Srv: On seek to t=120s
@@ -710,7 +755,7 @@ Single pass — ship only when legacy paths are gone.
 | Index memoization     | **Bounded LRU (session-scoped)**                        | Frame scan paid once per source per server run; cleared on start/dispose     |
 | Playback buffer       | `**chunkBufferCount`** (default 5)                     | Includes current chunk; playing 10 → hold 10–14                            |
 | Playback              | **Stream only (full refactor)**                        | Delete legacy modules; no dual paths                                       |
-| Chunk encoding        | **Same as today** (ogg/flac)                           | Reuse FFmpeg settings; webview decodes with `decodeAudioData`              |
+| Chunk encoding        | **Effective format** (ogg/mp3/flac/wav)                | User preference + encoder probe; webview decodes with `decodeAudioData`     |
 | Self-contained chunks | **Yes (v1)**                                           | Avoid init-segment complexity in webview                                   |
 | Index transport       | **JSON over HTTP**                                     | Easy to debug in VS Code webview                                           |
 | Probe tool            | **ffprobe**                                            | Accurate duration; falls back to ffmpeg stderr parse                       |
@@ -737,6 +782,8 @@ Single pass — ship only when legacy paths are gone.
 | Registry memory growth                     | `unregisterAudio` on tab dispose; optional TTL for orphaned ids                                     |
 | Last chunk shorter than `chunkDurationSec` | Manifest lists exact `durationSec`; decoder uses actual decoded length                              |
 | Very short files (< 1 chunk)               | `count = 1`, single chunk transcode                                                                 |
+| Preferred encoder missing (ogg/flac)       | Automatic fallback to mp3/wav; console notice; stream key uses effective format                     |
+| Both libvorbis and libmp3lame missing      | FFmpeg unavailable; one-time host notification; no playback                                          |
 
 
 ---

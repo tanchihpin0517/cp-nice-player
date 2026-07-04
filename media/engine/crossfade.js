@@ -45,9 +45,9 @@ function findWsolaOffset(tail, head, blendFrames, searchRadius, baseOffset = 0) 
   let bestOffset = 0;
   let bestScore = -Infinity;
 
-  for (let offset = 0; offset <= searchRadius; offset += 1) {
+  for (let offset = -searchRadius; offset <= searchRadius; offset += 1) {
     const headStart = baseOffset + offset;
-    if (headStart + blendFrames > head[0].length) {
+    if (headStart < 0 || headStart + blendFrames > head[0].length) {
       continue;
     }
     const score = normalizedCrossCorrelation(tail, head, headStart, blendFrames);

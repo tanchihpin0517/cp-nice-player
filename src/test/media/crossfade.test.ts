@@ -37,6 +37,26 @@ describe('crossfade', () => {
 			const offset = findWsolaOffset(tail, head, blendFrames, 4, 0);
 			expect(offset).toBe(4);
 		});
+
+		it('picks negative offset when best match is before baseOffset', () => {
+			const blendFrames = 4;
+			const tail = [new Float32Array([1, 0, -1, 0])];
+			const headData = new Float32Array([0, 0, 1, 0, -1, 0, 0, 0, 0]);
+			const head = [headData];
+
+			const offset = findWsolaOffset(tail, head, blendFrames, 4, 4);
+			expect(offset).toBe(-2);
+		});
+
+		it('does not return negative offset when baseOffset is zero', () => {
+			const blendFrames = 4;
+			const tail = [new Float32Array([1, 0, -1, 0])];
+			const headData = new Float32Array([0, 0, 1, 0, -1, 0, 0, 0, 0]);
+			const head = [headData];
+
+			const offset = findWsolaOffset(tail, head, blendFrames, 4, 0);
+			expect(offset).toBeGreaterThanOrEqual(0);
+		});
 	});
 
 	describe('linearCrossfade', () => {

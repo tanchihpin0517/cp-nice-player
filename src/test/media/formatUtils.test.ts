@@ -53,6 +53,10 @@ describe('formatUtils', () => {
 			expect(formatWsolaShift(441, 44100)).toBe('10.0ms(441)');
 		});
 
+		it('formats negative shifts with sign', () => {
+			expect(formatWsolaShift(-102, 44100)).toBe('-2.3ms(-102)');
+		});
+
 		it('returns em dash when inputs missing', () => {
 			expect(formatWsolaShift(null, 44100)).toBe('—');
 		});
