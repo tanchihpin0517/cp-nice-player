@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-04
+
+### Changed
+
+- WSOLA chunk-join alignment searches **±overlapFrames** around the nominal head position; `wsolaShiftSamples` is signed (backward search when `baseOffset > 0`).
+- Documented encode-format fallback (mp3/wav when ogg/flac encoders are unavailable) in `docs/stream.md`, `docs/frontend.md`, and README settings.
+
 ## [0.2.0] - 2026-07-04
 
 ### Added
@@ -150,6 +157,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio only — video tracks in container files are not played.
 - Chunk cache is session-scoped and cleared when the playback server stops or restarts.
 
+[0.2.1]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.2.1
 [0.2.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.2.0
 [0.1.7]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.7
 [0.1.6]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.6

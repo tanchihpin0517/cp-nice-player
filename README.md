@@ -88,6 +88,10 @@ FFmpeg on `PATH` is required for integration tests in the extension suite; suite
 
 ## Release notes
 
+### 0.2.1
+
+WSOLA alignment at chunk joins now searches ±overlapFrames (signed shift support). Encode-format fallback (mp3/wav) and streaming architecture docs updated.
+
 ### 0.2.0
 
 In-memory streaming only — no disk cache under `globalStorage/stream/`. Pin-aware LRU for encoded chunks in the webview. FFmpeg encoder fallback to mp3/wav when ogg/flac encoders are unavailable. Full backend and frontend test suites (`npm test`).
