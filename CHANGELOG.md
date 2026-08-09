@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-09
+
 ### Added
 
+- Extension icon for the Marketplace and Open VSX listings (`media/icon.png`, with `media/icon.svg` as the vector source).
 - Playback server status in the webview debug panel, reported over the extension's `postMessage` channel so it still arrives when the player cannot reach the server: state, port, external/local URL, registered audio count, ffmpeg details, and last error.
 - `GET /health` on the playback server, and `PlaybackServer.probeSelf()` — a loopback health check issued by the extension host. A failing webview fetch alongside a passing host probe identifies the server as reachable-but-not-from-the-webview (forwarded URL, CSP, stale `audioId`) rather than down.
 - **Refresh status** and **Restart server** buttons in the debug panel; restarting re-registers the currently open media.
@@ -167,6 +170,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio only — video tracks in container files are not played.
 - Chunk cache is session-scoped and cleared when the playback server stops or restarts.
 
+[0.3.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.3.0
 [0.2.1]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.2.1
 [0.2.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.2.0
 [0.1.7]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.1.7

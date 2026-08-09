@@ -88,6 +88,10 @@ FFmpeg on `PATH` is required for integration tests in the extension suite; suite
 
 ## Release notes
 
+### 0.3.0
+
+The debug panel reports playback server status over `postMessage`, so it still arrives when the webview cannot reach the server, and adds **Refresh status** and **Restart server** buttons. New `GET /health` endpoint plus a host-side loopback probe distinguishes a dead server from one that is merely unreachable from the webview. Ships an extension icon.
+
 ### 0.2.1
 
 WSOLA alignment at chunk joins now searches ±overlapFrames (signed shift support). Encode-format fallback (mp3/wav) and streaming architecture docs updated.

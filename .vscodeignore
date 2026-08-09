@@ -1,5 +1,7 @@
 .vscode/**
 .vscode-test/**
+.codegraph/**
+test_audio_files/**
 out/**
 node_modules/**
 src/**
