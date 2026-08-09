@@ -35,6 +35,13 @@
     <details class="debug-panel" id="debugPanel" open>
       <summary>Debug information</summary>
       <div class="debug-body">
+        <div class="debug-section-title">Playback server</div>
+        <dl class="debug-grid" id="serverGrid"></dl>
+        <div class="server-actions">
+          <button id="serverRefresh" class="btn btn-small" type="button">Refresh status</button>
+          <button id="serverRestart" class="btn btn-small" type="button">Restart server</button>
+        </div>
+        <div class="debug-section-title">Playback</div>
         <dl class="debug-grid" id="debugGrid"></dl>
         <div class="debug-log-title">Event log</div>
         <ol class="debug-log" id="debugLog"></ol>

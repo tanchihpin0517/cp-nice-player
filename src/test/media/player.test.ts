@@ -1,5 +1,11 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMockEngine, loadMediaMessage, setupPlayerDom, type MockEngine } from './helpers/setupPlayerDom';
+import {
+	createMockEngine,
+	loadMediaMessage,
+	serverStatusMessage,
+	setupPlayerDom,
+	type MockEngine,
+} from './helpers/setupPlayerDom';
 
 describe('player.js', () => {
 	let mockEngine: MockEngine;
@@ -131,6 +137,63 @@ describe('player.js', () => {
 		expect(log?.innerHTML).toContain('bytes=2.0KB');
 		expect(log?.innerHTML).toContain('decode');
 		expect(log?.innerHTML).toContain('wsola=');
+	});
+
+	it('shows an unknown server state before the extension reports one', () => {
+		// Rendered at startup, so the panel is never blank even if no status ever arrives.
+		expect(document.getElementById('serverGrid')?.innerHTML).toContain('unknown');
+	});
+
+	it('renders server status from the extension', () => {
+		window.dispatchEvent(new MessageEvent('message', { data: serverStatusMessage }));
+
+		const grid = document.getElementById('serverGrid');
+		expect(grid?.innerHTML).toContain('listening');
+		expect(grid?.innerHTML).toContain('https://abc.vscode-cdn.net:8765');
+		expect(grid?.innerHTML).toContain('forwarded');
+		expect(grid?.innerHTML).toContain('ok (12ms)');
+		expect(grid?.innerHTML).toContain('/usr/bin/ffmpeg');
+		expect(grid?.innerHTML).toContain('ogg');
+	});
+
+	it('marks an unreachable server and its error', () => {
+		window.dispatchEvent(new MessageEvent('message', {
+			data: {
+				type: 'serverStatus',
+				status: {
+					...serverStatusMessage.status,
+					state: 'failed',
+					lastError: 'bind failed',
+					hostReachable: { ok: false, error: 'ECONNREFUSED', checkedAt: 1 },
+				},
+			},
+		}));
+
+		const grid = document.getElementById('serverGrid');
+		expect(grid?.innerHTML).toContain('failed: ECONNREFUSED');
+		expect(grid?.innerHTML).toContain('bind failed');
+		expect(grid?.innerHTML).toContain('class="bad"');
+	});
+
+	it('reports engine errors to the extension, throttled', () => {
+		mockVscode.postMessage.mockClear();
+		mockEngine.dispatchEngineEvent('error', { message: 'Failed to fetch' });
+		mockEngine.dispatchEngineEvent('error', { message: 'Failed to fetch again' });
+
+		const streamErrors = mockVscode.postMessage.mock.calls.filter(
+			([message]) => (message as { type?: string }).type === 'streamError',
+		);
+		expect(streamErrors).toHaveLength(1);
+		expect(streamErrors[0][0]).toEqual({ type: 'streamError', message: 'Failed to fetch' });
+	});
+
+	it('requests status and restart from the debug panel buttons', () => {
+		mockVscode.postMessage.mockClear();
+		(document.getElementById('serverRefresh') as HTMLButtonElement).click();
+		(document.getElementById('serverRestart') as HTMLButtonElement).click();
+
+		expect(mockVscode.postMessage).toHaveBeenCalledWith({ type: 'requestServerStatus' });
+		expect(mockVscode.postMessage).toHaveBeenCalledWith({ type: 'restartServer' });
 	});
 
 	it('persists debug panel open state via vscode API', () => {

@@ -26,6 +26,10 @@ export class Registry {
 		return this.entries.get(audioId)?.fsPath;
 	}
 
+	size(): number {
+		return this.entries.size;
+	}
+
 	clear(): void {
 		this.entries.clear();
 	}

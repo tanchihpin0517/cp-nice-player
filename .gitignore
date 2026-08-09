@@ -5,3 +5,4 @@ node_modules
 *.vsix
 /ai_docs/
 /test_audio_files/
+/.codegraph

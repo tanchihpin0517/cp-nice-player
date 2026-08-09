@@ -253,6 +253,7 @@ Base: `http://127.0.0.1:{port}`.
 | —         | (internal)       | —              | Extension | `unregisterAudio(audioId)`              |
 | `GET`     | `/index`         | `audioId={id}` | Webview   | `application/json` manifest             |
 | `GET`     | `/chunk/{index}` | `audioId={id}` | Webview   | Encoded chunk bytes (`Content-Type` from manifest `encode.contentType`: `audio/ogg`, `audio/flac`, `audio/mpeg`, or `audio/wav`) |
+| `GET`     | `/health`        | —              | Extension host, webview | `{ ok, registeredAudioCount, encodeFormat, ffmpegAvailable }` |
 | `OPTIONS` | `*`              | —              | Webview   | CORS preflight                          |
 
 
@@ -292,6 +293,13 @@ resolveAudioId(audioId: string): string // → fsPath or throw 404
 2. Compute **stream key** from file metadata and encode settings (never sent to client)
 3. For `/index`: load frame-derived manifest from LRU (or build once), return JSON
 4. For `/chunk/{n}`: transcode chunk on the fly via FFmpeg stdout, stream bytes
+
+**`/health` is deliberately outside that contract** — no `audioId`, no registry lookup, and no
+ffmpeg requirement (it reads only the cached ffmpeg probe, so the response is synchronous). It
+answers exactly one question: *is this server accepting and answering requests?* The extension
+host calls it against `127.0.0.1` in `PlaybackServer.probeSelf()`, which is what lets the player
+distinguish a dead server from one it merely cannot reach — see
+[Server status reporting](frontend.md#server-status-reporting).
 
 `**audioId` format:** UUID v4 or short random string (e.g. 8–12 hex chars). Opaque to the frontend.
 

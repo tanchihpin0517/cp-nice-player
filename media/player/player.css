@@ -81,7 +81,8 @@ h1 {
   width: 100%;
 }
 
-.playback-controls .btn {
+.playback-controls .btn,
+.server-actions .btn {
   border: 1px solid var(--border);
   background: var(--panel-2);
   color: var(--text);
@@ -90,7 +91,8 @@ h1 {
   cursor: pointer;
 }
 
-.playback-controls .btn:hover {
+.playback-controls .btn:hover,
+.server-actions .btn:hover {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
@@ -175,6 +177,34 @@ h1 {
   word-break: break-all;
   white-space: pre-wrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.debug-grid dd.ok {
+  color: #4ade80;
+}
+
+.debug-grid dd.bad {
+  color: #f87171;
+}
+
+.debug-section-title {
+  margin: 16px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.server-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.server-actions .btn-small {
+  font-size: 11px;
+  padding: 4px 10px;
 }
 
 .debug-log-title {

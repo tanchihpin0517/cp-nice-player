@@ -11,6 +11,7 @@ import { EncodeFormat } from '../encodeFormat';
 import { FfmpegCheckResult, getEffectiveEncodeFormat } from '../ffmpegHost';
 import { isSupportedAudio } from '../mediaTypes';
 import { PlaybackService } from '../playback/playbackService';
+import { PlaybackServerStatus } from '../playback/serverStatus';
 import { PlayerSession } from './types';
 
 interface LoadMediaMessage {
@@ -28,6 +29,16 @@ interface LoadMediaMessage {
 	};
 }
 
+interface ServerStatusMessage {
+	type: 'serverStatus';
+	status: PlaybackServerStatus;
+}
+
+interface WebviewMessage {
+	type?: string;
+	message?: string;
+}
+
 export class WebviewPlayerSession implements PlayerSession {
 	private readonly panel: vscode.WebviewPanel;
 	private readonly disposables: vscode.Disposable[] = [];
@@ -37,6 +48,8 @@ export class WebviewPlayerSession implements PlayerSession {
 	private currentFfmpeg: FfmpegCheckResult | undefined;
 	private currentAudioId: string | undefined;
 	private loadGeneration = 0;
+	private restarting = false;
+	private disposed = false;
 
 	constructor(
 		panel: vscode.WebviewPanel,
@@ -51,16 +64,37 @@ export class WebviewPlayerSession implements PlayerSession {
 
 		void this.loadHtml(this.panel.webview);
 
-		this.panel.webview.onDidReceiveMessage((message) => {
-			if (
-				message?.type === 'ready' &&
-				this.currentMedia &&
-				this.currentFfmpeg &&
-				this.currentAudioId
-			) {
-				this.postMedia(this.currentMedia, this.currentAudioId);
-			}
+		this.panel.webview.onDidReceiveMessage((message: WebviewMessage) => {
+			this.handleWebviewMessage(message);
 		}, undefined, this.disposables);
+	}
+
+	private handleWebviewMessage(message: WebviewMessage): void {
+		switch (message?.type) {
+			case 'ready':
+				if (this.currentMedia && this.currentFfmpeg && this.currentAudioId) {
+					this.postMedia(this.currentMedia, this.currentAudioId);
+				}
+				void this.postServerStatus();
+				return;
+
+			case 'requestServerStatus':
+				void this.postServerStatus();
+				return;
+
+			// The webview could not reach the server. Answer with a freshly probed status so the
+			// player can tell a dead server from one it simply cannot reach.
+			case 'streamError':
+				void this.postServerStatus(message.message);
+				return;
+
+			case 'restartServer':
+				void this.restartServer();
+				return;
+
+			default:
+				return;
+		}
 	}
 
 	loadMedia(mediaUri: vscode.Uri, ffmpeg: FfmpegCheckResult): void {
@@ -69,7 +103,64 @@ export class WebviewPlayerSession implements PlayerSession {
 		void this.registerAndPost(mediaUri, ffmpeg);
 	}
 
+	/**
+	 * Reports server state over the webview message channel, which is independent of the HTTP
+	 * playback server — so this still arrives when the player's own fetches are failing.
+	 * `latestError` takes precedence over the server's recorded error: it is the more recent and
+	 * more specific failure (a failed registration, or an error the webview just reported).
+	 */
+	private async postServerStatus(latestError?: string): Promise<void> {
+		if (this.disposed) {
+			return;
+		}
+
+		try {
+			const status = await this.playbackService.getStatus();
+			if (this.disposed) {
+				return;
+			}
+
+			const message: ServerStatusMessage = {
+				type: 'serverStatus',
+				status: latestError ? { ...status, lastError: latestError } : status,
+			};
+			this.panel.webview.postMessage(message);
+		} catch (err) {
+			console.error('cp-nice-player: failed to collect playback server status', err);
+		}
+	}
+
+	private async restartServer(): Promise<void> {
+		if (this.restarting || this.disposed) {
+			return;
+		}
+
+		this.restarting = true;
+		try {
+			// The old registry is cleared by the restart, so the current audioId is already stale.
+			this.currentAudioId = undefined;
+			await this.playbackService.restart();
+
+			if (this.disposed) {
+				return;
+			}
+
+			if (this.currentMedia && this.currentFfmpeg) {
+				await this.registerAndPost(this.currentMedia, this.currentFfmpeg);
+			} else {
+				await this.postServerStatus();
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			void vscode.window.showErrorMessage(`CP's Nice Player: ${message}`);
+			await this.postServerStatus(message);
+		} finally {
+			this.restarting = false;
+		}
+	}
+
 	dispose(): void {
+		this.disposed = true;
 		this.unregisterCurrentAudio();
 		while (this.disposables.length > 0) {
 			const disposable = this.disposables.pop();
@@ -93,6 +184,7 @@ export class WebviewPlayerSession implements PlayerSession {
 		if (!ffmpeg.available) {
 			const message = ffmpeg.error ?? 'FFmpeg is not available.';
 			void vscode.window.showErrorMessage(`CP's Nice Player: ${message}`);
+			await this.postServerStatus(message);
 			return;
 		}
 
@@ -101,12 +193,15 @@ export class WebviewPlayerSession implements PlayerSession {
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			void vscode.window.showErrorMessage(`CP's Nice Player: ${message}`);
+			await this.postServerStatus(message);
 			return;
 		}
 
 		const server = this.playbackService.getServer();
 		if (!server) {
-			void vscode.window.showErrorMessage("CP's Nice Player: Playback server is not running.");
+			const message = 'Playback server is not running.';
+			void vscode.window.showErrorMessage(`CP's Nice Player: ${message}`);
+			await this.postServerStatus(message);
 			return;
 		}
 
@@ -120,9 +215,11 @@ export class WebviewPlayerSession implements PlayerSession {
 
 			this.currentAudioId = audioId;
 			this.postMedia(mediaUri, audioId);
+			await this.postServerStatus();
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			void vscode.window.showErrorMessage(`CP's Nice Player: ${message}`);
+			await this.postServerStatus(message);
 		}
 	}
 
@@ -137,6 +234,7 @@ export class WebviewPlayerSession implements PlayerSession {
 		const server = this.playbackService.getServer();
 		const serverUrl = server?.getServerUrl();
 		if (!serverUrl) {
+			void this.postServerStatus('Playback server has no reachable URL yet.');
 			return;
 		}
 

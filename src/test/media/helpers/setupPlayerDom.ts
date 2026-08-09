@@ -25,6 +25,9 @@ export function setupPlayerDom(): void {
     <input id="playbackSeek" type="range" min="0" max="1" step="0.001" value="0" disabled>
     <input id="playbackVolume" type="range" min="0" max="1" step="0.01" value="1" disabled>
     <input id="playbackMuted" type="checkbox" disabled>
+    <dl class="debug-grid" id="serverGrid"></dl>
+    <button id="serverRefresh" type="button">Refresh status</button>
+    <button id="serverRestart" type="button">Restart server</button>
     <dl class="debug-grid" id="debugGrid"></dl>
     <ol class="debug-log" id="debugLog"></ol>
     <details class="debug-panel" id="debugPanel" open>
@@ -79,6 +82,21 @@ export function createMockEngine(): MockEngine {
 
 	return engine;
 }
+
+export const serverStatusMessage = {
+	type: 'serverStatus' as const,
+	status: {
+		state: 'listening',
+		port: 8765,
+		localUrl: 'http://127.0.0.1:8765',
+		externalUrl: 'https://abc.vscode-cdn.net:8765',
+		urlForwarded: true,
+		registeredAudioCount: 1,
+		startedAt: 1700000000000,
+		ffmpeg: { available: true, path: '/usr/bin/ffmpeg', version: 'ffmpeg 7.1', encodeFormat: 'ogg' },
+		hostReachable: { ok: true, httpStatus: 200, elapsedMs: 12, checkedAt: 1700000000000 },
+	},
+};
 
 export const loadMediaMessage = {
 	type: 'loadMedia' as const,

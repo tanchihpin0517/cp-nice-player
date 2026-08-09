@@ -86,6 +86,14 @@ function applyEncodeResolution(
 	}
 }
 
+/**
+ * Last resolved ffmpeg check, without triggering a probe. Callers that must stay synchronous
+ * and cheap (e.g. the /health route) use this instead of `checkFfmpegAvailable()`.
+ */
+export function getCachedFfmpegResult(): FfmpegCheckResult | undefined {
+	return cachedResult;
+}
+
 export function getEffectiveEncodeFormat(): EncodeFormat {
 	if (cachedResult?.encodeFormat) {
 		return cachedResult.encodeFormat;

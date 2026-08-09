@@ -472,6 +472,42 @@ Each chunk is a **short self-contained encoded file** for that time range (Ogg, 
 - `chunkfinished` and `decodefinished` events (with `bytes` or `elapsedMs` / `wsolaShiftSamples`); the event log formats them as `fetch chunk=N bytes=<size>` and `decode chunk=N time=<ms>ms(<pct>%) wsola=<ms>ms(<samples>)`.
 - Debug panel: playback path, buffer/chunk state, ring stats, and a combined `audio` layout row (`Nch @ rate Hz`).
 
+### Server status reporting
+
+The webview↔extension `postMessage` channel is **independent of the playback server**. Server
+state therefore still reaches the player when every `fetch()` to the server is failing — which is
+precisely when the user needs it.
+
+| Message | Direction | Payload / effect |
+| --- | --- | --- |
+| `loadMedia` | extension → webview | `serverUrl`, `audioId`, `debug` settings |
+| `serverStatus` | extension → webview | `PlaybackServerStatus` (`src/playback/serverStatus.ts`) |
+| `ready` | webview → extension | Webview booted; extension replies with `loadMedia` (if media is pending) and `serverStatus` |
+| `requestServerStatus` | webview → extension | "Refresh status" button |
+| `streamError` | webview → extension | A fetch failed; extension replies with a freshly probed `serverStatus` (throttled to 1 per 2 s, since the index loop retries every second) |
+| `restartServer` | webview → extension | Disposes and re-starts the server, re-registers the current media, then reports status |
+
+The extension posts `serverStatus` on every failure exit in
+`WebviewPlayerSession.registerAndPost` — ffmpeg unavailable, server start failure, missing
+server, registration failure — and after a successful load.
+
+`PlaybackServerStatus` carries `state` (`stopped` / `starting` / `listening` / `failed` /
+`disposed`), `port`, `externalUrl`, `localUrl`, `urlForwarded`, `registeredAudioCount`,
+`lastError`, `ffmpeg`, and `hostReachable`.
+
+**`hostReachable` is the useful one.** It is the result of `PlaybackServer.probeSelf()` — a
+`GET /health` issued by the **extension host** over `127.0.0.1`, bypassing the webview entirely.
+Reading it against the webview's own symptoms:
+
+| Host probe | Webview fetches | Reading |
+| --- | --- | --- |
+| ok | ok | Healthy |
+| ok | failing | Server is alive but the webview can't reach it — forwarded URL (`urlForwarded: true` under Remote SSH / Codespaces), CSP, or a stale `audioId` |
+| failing | failing | Server is genuinely down; check `state` and `lastError`, then **Restart server** |
+
+The status rows render in the debug panel (`#serverGrid`) whether or not media has loaded, so a
+session that never connected at all still shows why.
+
 ### Playback state machine
 
 ```

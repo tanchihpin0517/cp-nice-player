@@ -1,6 +1,11 @@
 import * as http from 'http';
 import { getDebugLogging } from '../../config';
-import { checkFfmpegAvailable, FfmpegCheckResult } from '../../ffmpegHost';
+import {
+	checkFfmpegAvailable,
+	FfmpegCheckResult,
+	getCachedFfmpegResult,
+	getEffectiveEncodeFormat,
+} from '../../ffmpegHost';
 import { Registry } from './registry';
 import { getOrCreateChunk, ChunkOutOfRangeError } from './chunk';
 import { getOrCreateIndex } from './indexBuilder';
@@ -74,6 +79,20 @@ export function createRouteHandlers(
 	registry: Registry,
 ): Map<string, RouteHandler> {
 	const handlers = new Map<string, RouteHandler>();
+
+	// Deliberately outside `withAudio`: no audioId, and no ffmpeg requirement. A health check
+	// that fails because ffmpeg is missing cannot answer "is the server reachable at all?".
+	// Reads only cached ffmpeg state so the response stays synchronous and fast.
+	handlers.set('/health', async (_req, res, _url) => {
+		const ffmpeg = getCachedFfmpegResult();
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({
+			ok: true,
+			registeredAudioCount: registry.size(),
+			encodeFormat: getEffectiveEncodeFormat(),
+			ffmpegAvailable: ffmpeg?.available ?? null,
+		}));
+	});
 
 	handlers.set(
 		'/index',

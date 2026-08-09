@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Playback server status in the webview debug panel, reported over the extension's `postMessage` channel so it still arrives when the player cannot reach the server: state, port, external/local URL, registered audio count, ffmpeg details, and last error.
+- `GET /health` on the playback server, and `PlaybackServer.probeSelf()` — a loopback health check issued by the extension host. A failing webview fetch alongside a passing host probe identifies the server as reachable-but-not-from-the-webview (forwarded URL, CSP, stale `audioId`) rather than down.
+- **Refresh status** and **Restart server** buttons in the debug panel; restarting re-registers the currently open media.
+
+### Changed
+
+- Failure paths in `WebviewPlayerSession` (ffmpeg unavailable, server start failure, registration failure) now report to the webview instead of only raising a notification toast.
+
 ## [0.2.1] - 2026-07-04
 
 ### Changed

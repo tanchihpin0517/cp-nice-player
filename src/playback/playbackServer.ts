@@ -7,6 +7,14 @@ import { clearStreamIndexCache } from './stream/indexBuilder';
 import { registerAudio as registerStreamAudio } from './stream/registrar';
 import { Registry } from './stream/registry';
 import { createRouteHandlers, matchRoute } from './stream/routes';
+import {
+	HostReachability,
+	localUrlForPort,
+	PlaybackServerState,
+	PlaybackServerStatus,
+} from './serverStatus';
+
+const SELF_PROBE_TIMEOUT_MS = 2000;
 
 export class PlaybackServer implements vscode.Disposable {
 	private server: http.Server | undefined;
@@ -14,6 +22,9 @@ export class PlaybackServer implements vscode.Disposable {
 	private port: number | undefined;
 	private externalUrl: string | undefined;
 	private disposed = false;
+	private state: PlaybackServerState = 'stopped';
+	private lastError: string | undefined;
+	private startedAt: number | undefined;
 	private readonly registry = new Registry();
 	private readonly routeHandlers: ReturnType<typeof createRouteHandlers>;
 
@@ -32,6 +43,7 @@ export class PlaybackServer implements vscode.Disposable {
 
 		if (!this.listenPromise) {
 			clearStreamIndexCache();
+			this.state = 'starting';
 			this.listenPromise = this.bindServer();
 		}
 
@@ -46,6 +58,8 @@ export class PlaybackServer implements vscode.Disposable {
 				throw err;
 			}
 			const message = err instanceof Error ? err.message : String(err);
+			this.state = 'failed';
+			this.lastError = message;
 			console.error('cp-nice-player: failed to start playback server', err);
 			void vscode.window.showErrorMessage(
 				`CP's Nice Player: Playback server failed to start. ${message}`,
@@ -67,8 +81,83 @@ export class PlaybackServer implements vscode.Disposable {
 		return this.externalUrl;
 	}
 
+	getStatus(ffmpeg: FfmpegCheckResult): PlaybackServerStatus {
+		const localUrl = this.port !== undefined ? localUrlForPort(this.port) : undefined;
+
+		return {
+			state: this.state,
+			port: this.port,
+			localUrl,
+			externalUrl: this.externalUrl,
+			urlForwarded: Boolean(localUrl && this.externalUrl && this.externalUrl !== localUrl),
+			registeredAudioCount: this.registry.size(),
+			startedAt: this.startedAt,
+			lastError: this.lastError,
+			ffmpeg: {
+				available: ffmpeg.available,
+				path: ffmpeg.path,
+				version: ffmpeg.version,
+				encodeFormat: ffmpeg.available ? getEffectiveEncodeFormat() : undefined,
+				error: ffmpeg.error,
+			},
+		};
+	}
+
+	/**
+	 * Requests /health from the extension host itself. This bypasses the webview entirely, so a
+	 * failure here means the server is genuinely down rather than merely unreachable from the
+	 * webview (forwarded URL, CSP, tunnel).
+	 */
+	probeSelf(timeoutMs = SELF_PROBE_TIMEOUT_MS): Promise<HostReachability> {
+		const startedAt = Date.now();
+
+		if (this.disposed || this.port === undefined) {
+			return Promise.resolve({
+				ok: false,
+				error: this.disposed ? 'Playback server was disposed.' : 'Playback server is not listening.',
+				checkedAt: startedAt,
+			});
+		}
+
+		const url = `${localUrlForPort(this.port)}/health`;
+
+		return new Promise<HostReachability>((resolve) => {
+			let settled = false;
+			const finish = (result: Omit<HostReachability, 'checkedAt' | 'elapsedMs'>) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				resolve({
+					...result,
+					elapsedMs: Date.now() - startedAt,
+					checkedAt: startedAt,
+				});
+			};
+
+			const request = http.get(url, { timeout: timeoutMs }, (res) => {
+				const httpStatus = res.statusCode ?? 0;
+				res.resume();
+				res.on('end', () => {
+					finish({ ok: httpStatus >= 200 && httpStatus < 300, httpStatus });
+				});
+			});
+
+			request.on('timeout', () => {
+				request.destroy();
+				finish({ ok: false, error: `Timed out after ${timeoutMs}ms.` });
+			});
+
+			request.on('error', (err) => {
+				finish({ ok: false, error: err instanceof Error ? err.message : String(err) });
+			});
+		});
+	}
+
 	dispose(): void {
 		this.disposed = true;
+		this.state = 'disposed';
+		this.startedAt = undefined;
 		this.registry.clear();
 		clearStreamIndexCache();
 		this.server?.close();
@@ -99,9 +188,12 @@ export class PlaybackServer implements vscode.Disposable {
 
 				this.port = address.port;
 				const externalUri = await vscode.env.asExternalUri(
-					vscode.Uri.parse(`http://127.0.0.1:${this.port}`),
+					vscode.Uri.parse(localUrlForPort(this.port)),
 				);
 				this.externalUrl = externalUri.toString(true);
+				this.state = 'listening';
+				this.startedAt = Date.now();
+				this.lastError = undefined;
 				console.log(
 					`cp-nice-player: Playback server started on ${this.externalUrl}.`,
 				);

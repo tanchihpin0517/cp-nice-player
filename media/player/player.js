@@ -11,12 +11,18 @@ const playbackMuted = document.getElementById('playbackMuted');
 const debugGrid = document.getElementById('debugGrid');
 const debugLog = document.getElementById('debugLog');
 const debugPanel = document.getElementById('debugPanel');
+const serverGrid = document.getElementById('serverGrid');
+const serverRefresh = document.getElementById('serverRefresh');
+const serverRestart = document.getElementById('serverRestart');
 
 const engine = new StreamingAudioEngine();
 let debugContext = null;
+let serverStatus = null;
+let lastStreamErrorReportAt = 0;
 let pendingSeekDrag = false;
 const eventLog = [];
 const MAX_LOG_ENTRIES = 30;
+const STREAM_ERROR_REPORT_INTERVAL_MS = 2000;
 
 function logEvent(name, detail) {
   const timestamp = new Date().toLocaleTimeString();
@@ -34,8 +40,82 @@ function renderEventLog() {
   }).join('');
 }
 
-function renderDebugField(label, value) {
-  return '<dt>' + escapeHtml(label) + '</dt><dd>' + escapeHtml(value ?? '—') + '</dd>';
+function renderDebugField(label, value, tone) {
+  const cls = tone ? ' class="' + tone + '"' : '';
+  return '<dt>' + escapeHtml(label) + '</dt><dd' + cls + '>' + escapeHtml(value ?? '—') + '</dd>';
+}
+
+// The extension host reports server state over the webview message channel, which does not go
+// through the playback server. So these rows stay accurate even when every fetch is failing —
+// that is the whole point of the panel.
+function updateServerPanel() {
+  if (!serverStatus) {
+    serverGrid.innerHTML = renderDebugField('state', 'unknown (no report from extension)', 'bad');
+    return;
+  }
+
+  const status = serverStatus;
+  const fields = [renderDebugField('state', status.state, status.state === 'listening' ? 'ok' : 'bad')];
+
+  if (status.externalUrl) {
+    fields.push(renderDebugField('url', status.externalUrl));
+  }
+  if (status.urlForwarded && status.localUrl) {
+    fields.push(renderDebugField('local url', status.localUrl + ' (forwarded)'));
+  }
+
+  fields.push(renderDebugField(
+    'host reachable',
+    formatHostReachable(status.hostReachable),
+    status.hostReachable ? (status.hostReachable.ok ? 'ok' : 'bad') : undefined,
+  ));
+  fields.push(renderDebugField('registered audio', String(status.registeredAudioCount ?? 0)));
+  fields.push(renderDebugField(
+    'ffmpeg',
+    formatFfmpegStatus(status.ffmpeg),
+    status.ffmpeg && !status.ffmpeg.available ? 'bad' : undefined,
+  ));
+  fields.push(renderDebugField('last error', status.lastError, status.lastError ? 'bad' : undefined));
+
+  serverGrid.innerHTML = fields.join('');
+}
+
+function formatHostReachable(reachable) {
+  if (!reachable) {
+    return 'not checked';
+  }
+  if (reachable.ok) {
+    return 'ok (' + (reachable.elapsedMs ?? 0) + 'ms)';
+  }
+  return 'failed: ' + (reachable.error ?? 'HTTP ' + reachable.httpStatus);
+}
+
+function formatFfmpegStatus(ffmpeg) {
+  if (!ffmpeg) {
+    return '—';
+  }
+  if (!ffmpeg.available) {
+    return 'unavailable: ' + (ffmpeg.error ?? 'unknown reason');
+  }
+  let text = ffmpeg.path;
+  if (ffmpeg.version) {
+    text += ' (' + ffmpeg.version + ')';
+  }
+  if (ffmpeg.encodeFormat) {
+    text += ' → ' + ffmpeg.encodeFormat;
+  }
+  return text;
+}
+
+// Tells the extension a fetch failed so it replies with a freshly probed status. Throttled
+// because the engine retries the index once a second.
+function reportStreamError(message) {
+  const now = Date.now();
+  if (now - lastStreamErrorReportAt < STREAM_ERROR_REPORT_INTERVAL_MS) {
+    return;
+  }
+  lastStreamErrorReportAt = now;
+  vscode.postMessage({ type: 'streamError', message });
 }
 
 function setPlayButtonLabel(playing) {
@@ -127,6 +207,7 @@ async function loadMediaMessage(message) {
     const detail = error instanceof Error ? error.message : String(error);
     trackState.textContent = 'Load error: ' + detail;
     logEvent('error', detail);
+    reportStreamError(detail);
     updateDebugPanel();
   }
 }
@@ -197,6 +278,15 @@ function bindControls() {
     engine.setMuted(playbackMuted.checked);
     updateDebugPanel();
   });
+
+  serverRefresh.addEventListener('click', () => {
+    vscode.postMessage({ type: 'requestServerStatus' });
+  });
+
+  serverRestart.addEventListener('click', () => {
+    logEvent('restartServer');
+    vscode.postMessage({ type: 'restartServer' });
+  });
 }
 
 function bindEngineEvents() {
@@ -256,6 +346,7 @@ function bindEngineEvents() {
     if (engine.getDiagnostics().manifestChunkCount == null) {
       trackState.textContent = 'Index error (retrying): ' + event.detail.message;
     }
+    reportStreamError(event.detail.message);
     updateDebugPanel();
   });
 }
@@ -263,11 +354,17 @@ function bindEngineEvents() {
 bindControls();
 bindEngineEvents();
 updateDebugPanel();
+updateServerPanel();
 
 window.addEventListener('message', (event) => {
   const message = event.data;
   if (message?.type === 'loadMedia') {
     void loadMediaMessage(message);
+    return;
+  }
+  if (message?.type === 'serverStatus') {
+    serverStatus = message.status;
+    updateServerPanel();
   }
 });
 
