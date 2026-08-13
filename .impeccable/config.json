@@ -1,0 +1,71 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "layout-transition",
+        "value": "*",
+        "files": [
+          "docs/design/player/index.html"
+        ],
+        "createdAt": "2026-08-13T12:58:58.011Z",
+        "reason": "assistant: transition: max-width lives in docs/design/player/demo/demo.css, the demo toolbar's width-preset animation; demo chrome is never shipped (see the Ships? column in docs/design/player/README.md)"
+      },
+      {
+        "rule": "marquee",
+        "value": "*",
+        "files": [
+          "docs/design/player/index.html"
+        ],
+        "createdAt": "2026-08-13T12:58:58.054Z",
+        "reason": "assistant: the only looping animation is .cp-scan, the indeterminate progress bar shown while the index is read; it exists only in data-state=loading and stops under prefers-reduced-motion. player.css already carries a file-level ignore; this covers the demo page, where a linked-stylesheet finding is attributed to the HTML"
+      },
+      {
+        "rule": "repeating-stripes-gradient",
+        "value": "*",
+        "files": [
+          "docs/design/player/index.html"
+        ],
+        "createdAt": "2026-08-13T12:58:58.094Z",
+        "reason": "assistant: .cp-fader::after is the level scale on the fader slot, 1px marks at 25% intervals — a control's measurement scale in the committed transport-bridge world, requested by the finish reviewer's ceiling note, not surface decoration"
+      },
+      {
+        "rule": "design-system-radius",
+        "value": "*",
+        "files": [
+          "docs/design/player/index.html"
+        ],
+        "createdAt": "2026-08-13T13:09:20.344Z",
+        "reason": "assistant: the 6px radius is on the demo toolbar's <select> in docs/design/player/demo/demo.css; demo chrome is never shipped"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          "docs/design/player/index.html"
+        ],
+        "createdAt": "2026-08-13T13:09:20.389Z",
+        "reason": "assistant: docs/design/player/demo/themes.css resolves --vscode-editor-font-family to a concrete stack per theme fixture, standing in for what VS Code injects; DESIGN.md declares the token, which is the only thing the shipped surface can name"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "*",
+        "files": [
+          "docs/design/player/index.html"
+        ],
+        "createdAt": "2026-08-13T13:11:43.599Z",
+        "reason": "assistant: every hit is on the demo toolbar chrome in docs/design/player/demo/demo.css, which is hardcoded by design and never shipped (Ships? = no in docs/design/player/README.md). The player markup in the same page is clean."
+      },
+      {
+        "rule": "design-system-color",
+        "value": "*",
+        "files": [
+          "media/player/player.html"
+        ],
+        "createdAt": "2026-08-13T13:11:43.642Z",
+        "reason": "assistant: player.html is an extension template — its stylesheet is the unresolved {{styleUri}} placeholder, so a browser engine renders it unstyled and reports default black text. The faithful render is docs/design/player/index.html; player.css scans clean on its own."
+      }
+    ]
+  }
+}

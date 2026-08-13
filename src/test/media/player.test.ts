@@ -125,12 +125,87 @@ describe('player.js', () => {
 	it('does not move the playhead readout while scrubbing the waveform', () => {
 		const wave = el('wave');
 		wave.setAttribute('aria-disabled', 'false');
-		wave.dispatchEvent(new PointerEvent('pointerdown', { clientX: 400, bubbles: true }));
+		// clientY has to land in the tape register: the ruler marks locators instead.
+		wave.dispatchEvent(new PointerEvent('pointerdown', { clientX: 400, clientY: 70, bubbles: true }));
+		const scrubbed = el('currentTime').textContent;
 
 		mockEngine.dispatchEngineEvent('timeupdate', { currentTime: 10, duration: 120 });
-		expect(el('currentTime').textContent).not.toBe('0:10');
+		expect(el('currentTime').textContent).toBe(scrubbed);
 
-		wave.dispatchEvent(new PointerEvent('pointerup', { clientX: 400, bubbles: true }));
+		wave.dispatchEvent(new PointerEvent('pointerup', { clientX: 400, clientY: 70, bubbles: true }));
+	});
+
+	it('shows the counter to the millisecond', () => {
+		mockEngine.dispatchEngineEvent('timeupdate', { currentTime: 83.4567, duration: 120 });
+		expect(el('currentTime').textContent).toBe('1:23.456');
+	});
+
+	describe('locators and looping', () => {
+		const wave = () => el('wave');
+
+		function markRuler(fromX: number, toX: number) {
+			wave().setAttribute('aria-disabled', 'false');
+			// clientY inside the ruler register, which is where a region is marked.
+			wave().dispatchEvent(new PointerEvent('pointerdown', { clientX: fromX, clientY: 4, bubbles: true }));
+			wave().dispatchEvent(new PointerEvent('pointerup', { clientX: toX, clientY: 4, bubbles: true }));
+		}
+
+		beforeEach(() => {
+			el('player').dataset.state = 'ready';
+			document.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', bubbles: true }));
+		});
+
+		it('marks a region by dragging the ruler and enables the loop key', () => {
+			expect(el<HTMLButtonElement>('loopToggle').disabled).toBe(true);
+
+			// The canvas is stubbed 800px wide over a 120s track: 100px is 15s.
+			markRuler(100, 300);
+
+			expect(el<HTMLButtonElement>('loopToggle').disabled).toBe(false);
+			expect(el('loopReadout').textContent).toContain('In 0:15.000');
+			expect(el('loopReadout').textContent).toContain('Out 0:45.000');
+		});
+
+		it('clears the region on a ruler click, which disables the loop key', () => {
+			markRuler(100, 300);
+			markRuler(200, 200);
+
+			expect(el<HTMLButtonElement>('loopToggle').disabled).toBe(true);
+			expect(el('loopReadout').textContent).toBe('');
+		});
+
+		it('sets each edge from the playhead with the bracket keys', () => {
+			mockEngine.getCurrentTime.mockReturnValue(12);
+			document.dispatchEvent(new KeyboardEvent('keydown', { key: '[', bubbles: true }));
+			mockEngine.getCurrentTime.mockReturnValue(18);
+			document.dispatchEvent(new KeyboardEvent('keydown', { key: ']', bubbles: true }));
+
+			expect(el('loopReadout').textContent).toContain('In 0:12.000');
+			expect(el('loopReadout').textContent).toContain('Out 0:18.000');
+			expect(el<HTMLButtonElement>('loopToggle').disabled).toBe(false);
+		});
+
+		it('latches the loop and wraps the playhead back to the in point', async () => {
+			markRuler(100, 300);
+			mockEngine.getCurrentTime.mockReturnValue(20);
+			el('loopToggle').click();
+			await vi.waitFor(() => expect(el('loopToggle').dataset.lit).toBe('true'));
+
+			mockEngine.seek.mockClear();
+			mockEngine.dispatchEngineEvent('timeupdate', { currentTime: 45.2, duration: 120 });
+			await vi.waitFor(() => expect(mockEngine.seek).toHaveBeenCalledWith(15));
+		});
+
+		it('leaves the playhead alone inside the region', async () => {
+			markRuler(100, 300);
+			mockEngine.getCurrentTime.mockReturnValue(20);
+			el('loopToggle').click();
+			await vi.waitFor(() => expect(el('loopToggle').dataset.lit).toBe('true'));
+
+			mockEngine.seek.mockClear();
+			mockEngine.dispatchEngineEvent('timeupdate', { currentTime: 30, duration: 120 });
+			expect(mockEngine.seek).not.toHaveBeenCalled();
+		});
 	});
 
 	it('renders playback diagnostics', async () => {

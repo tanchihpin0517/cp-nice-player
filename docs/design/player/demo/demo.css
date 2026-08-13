@@ -104,6 +104,7 @@
 #cpRoot {
   max-width: 1100px;
   margin: 0 auto;
+  /* impeccable-disable-line layout-transition -- demo chrome only, never shipped */
   transition: max-width 160ms ease;
 }
 

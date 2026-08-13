@@ -21,35 +21,51 @@ export interface MockEngine {
 export function setupPlayerDom(): void {
 	document.body.innerHTML = `
     <div class="cp-root">
-      <main class="cp-player" id="player" data-state="empty" data-playing="false" data-muted="false">
-        <h1 id="trackName">No media loaded</h1>
-        <span id="chipFormat"></span>
-        <span id="chipLayout"></span>
-        <span id="chipChunks"></span>
-        <span class="cp-status" id="trackStatus" data-tone="idle">
+      <main class="cp-player" id="player"
+            data-state="empty" data-playing="false" data-muted="false" data-loop="off">
+        <span id="trackName">No media loaded</span>
+        <div class="cp-band" id="trackStatus" data-tone="idle">
           <span id="trackStatusText">Waiting for a file</span>
-        </span>
-        <button id="inspectorToggle" type="button" aria-expanded="false"></button>
+          <span id="errorMessage"></span>
+          <span class="cp-band-actions">
+            <button id="errorRetry" type="button"></button>
+            <button id="errorDiagnostics" type="button"></button>
+          </span>
+        </div>
 
-        <div class="cp-wave" id="wave" role="slider" tabindex="0">
+        <div class="cp-well" id="wave" role="slider" tabindex="0">
           <canvas id="waveCanvas"></canvas>
-          <div id="waveSkeleton"></div>
+          <div id="waveSkeleton">
+            <span id="wellTitle">No tape loaded</span>
+            <span id="wellHint"></span>
+          </div>
           <div id="waveHover"><span id="waveHoverTime">0:00</span></div>
         </div>
-        <span id="currentTime">0:00</span>
-        <span id="durationTime">0:00</span>
+        <span id="loopReadout"></span>
 
+        <span class="cp-clock-elapsed" id="currentTime">0:00.000</span>
+        <span id="durationTime">—</span>
+        <span id="remainingTime"></span>
+
+        <button id="skipStart" type="button"></button>
         <button id="skipBack" type="button"></button>
         <button id="playPause" type="button" aria-label="Play"></button>
+        <span id="playLabel">Play</span>
         <button id="skipForward" type="button"></button>
+        <button id="loopToggle" type="button" aria-pressed="false"></button>
         <button id="muteBtn" type="button" aria-label="Mute"></button>
         <input type="range" id="volume" min="0" max="1" step="0.01" value="1">
+        <span id="levelValue">100</span>
 
-        <div id="errorState"><div id="errorMessage"></div>
-          <button id="errorRetry" type="button"></button>
-          <button id="errorDiagnostics" type="button"></button>
+        <div class="cp-fields">
+          <span class="cp-field"><b id="chipFormat"></b></span>
+          <span class="cp-field"><b id="chipLayout"></b></span>
+          <span class="cp-field"><b id="chipChunks"></b></span>
+          <span class="cp-field"><b id="fieldChunk"></b></span>
+          <span class="cp-field"><b id="fieldRing"></b></span>
+          <span class="cp-field" id="fieldUnderrunWrap"><b id="fieldUnderrun"></b></span>
         </div>
-        <div id="emptyState"></div>
+        <button id="inspectorToggle" type="button" aria-expanded="false"></button>
 
         <section id="inspector" hidden>
           <button id="serverRefresh" type="button">Refresh</button>
@@ -71,13 +87,23 @@ export function stubCanvasEnvironment(): void {
 	};
 
 	const noop = () => undefined;
-	const context = new Proxy({}, { get: () => noop, set: () => true });
+	// measureText is the one call whose return value is read (the ruler clamps its
+	// numerals by text width), so a blanket noop proxy would throw there.
+	const context = new Proxy({}, {
+		get: (_target, property) => (property === 'measureText' ? () => ({ width: 24 }) : noop),
+		set: () => true,
+	});
 	HTMLCanvasElement.prototype.getContext = (() => context) as unknown as
 		HTMLCanvasElement['getContext'];
-	HTMLCanvasElement.prototype.getBoundingClientRect = () => ({
+
+	const box = {
 		width: 800, height: 132, left: 0, top: 0, right: 800, bottom: 132, x: 0, y: 0,
 		toJSON: () => ({}),
-	});
+	};
+	// jsdom reports a zero box for every element, which puts pointer coordinates in
+	// the wrong register of the waveform. One shared box keeps the maths honest.
+	HTMLElement.prototype.getBoundingClientRect = () => box;
+	HTMLCanvasElement.prototype.getBoundingClientRect = () => box;
 	Element.prototype.setPointerCapture = noop;
 	Element.prototype.releasePointerCapture = noop;
 }

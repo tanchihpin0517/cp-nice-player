@@ -61,124 +61,218 @@
 
 
 <!-- ============ SHIPPING MARKUP — this is what goes in player.html ============ -->
+<!--
+  IMPECCABLE DIRECTION — seed 2c482cb7 (direction/operate, assigned index 3)
+  THESIS: The player is a machined transport bridge, refusing the rounded card
+    with a centred circular play button this category always ships.
+  OWN-WORLD: One plate; 2px milled corners and no pills; rows divided by scored
+    hairlines; engraved micro-caps legends; square keys that light with a lamp
+    bar; a counter in a milled aperture; every colour from a --vscode-* token.
+  STORY: The listener sees a machine with tape on it, hears sound in under a
+    second, marks a region to hear again, and reads why when it fails.
+  FIRST VIEWPORT: Nameplate, then one full-width status band; a well holding the
+    ruler, tape and chunk registers, taking the pane's spare height; below it the
+    counter at display scale beside five lamp keys and the level fader in its
+    scored slot; one engraved data line closing the plate.
+  FORM: Studer/Revox transport bridge, candidate 3 of 7, seed 2c482cb7.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the
+    finish review, the verdict, and DESIGN.md
+-->
+<!-- impeccable-disable nested-cards -- the well and the counter aperture are recesses milled into one machined plate, this world's core material device, not cards in a card -->
 <div class="cp-root" id="cpRoot">
-  <main class="cp-player" id="player" data-state="empty" data-playing="false" data-muted="false">
+  <main class="cp-player" id="player"
+        data-state="empty" data-playing="false" data-muted="false" data-loop="off">
 
-    <header class="cp-head">
-      <div class="cp-title">
-        <h1 class="cp-name" id="trackName">No media loaded</h1>
-        <div class="cp-meta">
-          <span class="cp-chip" id="chipFormat"></span>
-          <span class="cp-chip" id="chipLayout"></span>
-          <span class="cp-chip" id="chipChunks"></span>
-        </div>
-      </div>
-      <div class="cp-head-actions">
-        <span class="cp-status" id="trackStatus" data-tone="idle" aria-live="polite">
-          <i class="cp-dot"></i>
-          <span class="cp-status-text" id="trackStatusText">Waiting for a file</span>
-        </span>
-        <button class="cp-icon-btn" id="inspectorToggle" type="button"
-                aria-expanded="false" aria-controls="inspector" title="Diagnostics">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-            <path d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h8M16 17h4"/>
-            <circle cx="16" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="14" cy="17" r="2"/>
-          </svg>
-        </button>
-      </div>
-    </header>
+    <div class="cp-row cp-nameplate">
+      <span class="cp-engraved">Source</span>
+      <h1 class="cp-name" id="trackName">No media loaded</h1>
+    </div>
 
-    <div class="cp-stage">
-      <div class="cp-wave" id="wave" role="slider" tabindex="0"
-           aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+    <!--
+      One band, full width, saying the single thing that is currently true. A
+      failure repaints this band and hands it the message and the two recovery
+      keys; nothing else on the plate grows a second panel to say it again.
+    -->
+    <div class="cp-row cp-band" id="trackStatus" data-tone="idle" aria-live="polite">
+      <i class="cp-dot"></i>
+      <span class="cp-status-text" id="trackStatusText">Waiting for a file</span>
+      <span class="cp-band-message" id="errorMessage"></span>
+      <span class="cp-band-actions">
+        <button class="cp-btn" id="errorRetry" type="button">Retry now</button>
+        <button class="cp-btn" id="errorDiagnostics" type="button">Server status</button>
+      </span>
+    </div>
+
+    <div class="cp-row cp-face">
+      <div class="cp-well" id="wave" role="slider" tabindex="0"
+           aria-label="Seek. Drag the ruler to mark a loop region."
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0:00">
         <canvas id="waveCanvas"></canvas>
-        <div class="cp-wave-skeleton" id="waveSkeleton"></div>
-        <div class="cp-wave-hover" id="waveHover"><span id="waveHoverTime">0:00</span></div>
+        <div class="cp-well-legend" id="waveSkeleton">
+          <span class="cp-well-legend-title" id="wellTitle">No tape loaded</span>
+          <span class="cp-scan"></span>
+          <span class="cp-well-legend-hint" id="wellHint">
+            Open an audio file, or pick <b>CP's Nice Player</b> from the editor title bar
+            or the <b>Open With…</b> menu.
+          </span>
+        </div>
+        <div class="cp-well-flag" id="waveHover"><span id="waveHoverTime">0:00</span></div>
       </div>
-      <div class="cp-times">
-        <span class="cp-time cp-time-current" id="currentTime">0:00</span>
-        <span class="cp-legend">
-          <span class="cp-legend-item"><i class="cp-swatch" data-kind="decoded"></i>decoded</span>
-          <span class="cp-legend-item"><i class="cp-swatch" data-kind="inflight"></i>fetching</span>
-          <span class="cp-legend-item"><i class="cp-swatch" data-kind="empty"></i>not buffered</span>
+      <div class="cp-key-legend">
+        <span class="cp-engraved cp-legend-head">Buffer</span>
+        <span class="cp-key-item">
+          <i class="cp-swatch" data-kind="decoded"></i><span class="cp-engraved">Decoded</span>
         </span>
-        <span class="cp-time cp-time-total" id="durationTime">0:00</span>
+        <span class="cp-key-item">
+          <i class="cp-swatch" data-kind="inflight"></i><span class="cp-engraved">Fetching</span>
+        </span>
+        <span class="cp-key-item">
+          <i class="cp-swatch" data-kind="empty"></i><span class="cp-engraved">Unread</span>
+        </span>
+        <span class="cp-locators" id="loopReadout"></span>
       </div>
     </div>
 
-    <div class="cp-transport">
-      <div class="cp-transport-center">
-        <button class="cp-skip" id="skipBack" type="button" title="Back 10 seconds (J)" aria-label="Back 10 seconds">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.5 6.2v11.6L3.3 12zM20.7 6.2v11.6L12.5 12z"/></svg>
-        </button>
-        <button class="cp-play" id="playPause" type="button" title="Play/pause (Space)" aria-label="Play">
-          <svg class="cp-icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72L19 12z"/></svg>
-          <svg class="cp-icon-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h3.2v14H7zM13.8 5H17v14h-3.2z"/></svg>
-        </button>
-        <button class="cp-skip" id="skipForward" type="button" title="Forward 10 seconds (L)" aria-label="Forward 10 seconds">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 6.2v11.6L20.7 12zM3.3 6.2v11.6L11.5 12z"/></svg>
-        </button>
+    <div class="cp-row cp-bridge">
+      <div class="cp-counter">
+        <!-- A milled aperture, the way a tape counter is set into the bridge. -->
+        <div class="cp-aperture">
+          <span class="cp-clock-elapsed" id="currentTime" role="timer">0:00.000</span>
+        </div>
+        <div class="cp-counter-legend">
+          <span class="cp-engraved">Elapsed</span>
+          <span class="cp-engraved" id="remainingTime"></span>
+          <span class="cp-engraved cp-total">Total <b id="durationTime">&mdash;</b></span>
+        </div>
       </div>
 
-      <div class="cp-transport-right">
-        <div class="cp-volume">
-          <button class="cp-icon-btn" id="muteBtn" type="button" title="Mute (M)" aria-label="Mute">
-            <svg class="cp-icon-volume" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z" fill="currentColor" stroke="none"/>
-              <path d="M15.6 9a4.2 4.2 0 0 1 0 6M18.2 6.6a7.6 7.6 0 0 1 0 10.8"/>
-            </svg>
-            <svg class="cp-icon-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-              <path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z" fill="currentColor" stroke="none"/>
-              <path d="M16 10l4.5 4.5M20.5 10L16 14.5"/>
+      <div class="cp-keys">
+        <span class="cp-key">
+          <button class="cp-sq" id="skipStart" type="button"
+                  title="Return to start (Home)" aria-label="Return to start">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M5 5h2.2v14H5zM19.4 5.4v13.2L9.4 12z"/>
             </svg>
           </button>
-          <label class="cp-sr-only" for="volume">Volume</label>
-          <input type="range" id="volume" min="0" max="1" step="0.01" value="1" title="Volume">
+          <span class="cp-key-label">RTZ</span>
+        </span>
+
+        <span class="cp-key">
+          <button class="cp-sq" id="skipBack" type="button"
+                  title="Back 10 seconds (J)" aria-label="Back 10 seconds">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M11.2 6.4v11.2L3.6 12zM20.4 6.4v11.2L12.8 12z"/>
+            </svg>
+          </button>
+          <span class="cp-key-label">&minus;10</span>
+        </span>
+
+        <span class="cp-key cp-key-main">
+          <button class="cp-sq" id="playPause" type="button"
+                  title="Play/pause (Space)" aria-label="Play">
+            <svg class="cp-icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M8 5.2v13.6L19 12z"/>
+            </svg>
+            <svg class="cp-icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M7.2 5h3.2v14H7.2zM13.6 5h3.2v14h-3.2z"/>
+            </svg>
+          </button>
+          <span class="cp-key-label" id="playLabel">Play</span>
+        </span>
+
+        <span class="cp-key">
+          <button class="cp-sq" id="skipForward" type="button"
+                  title="Forward 10 seconds (L)" aria-label="Forward 10 seconds">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12.8 6.4v11.2L20.4 12zM3.6 6.4v11.2L11.2 12z"/>
+            </svg>
+          </button>
+          <span class="cp-key-label">+10</span>
+        </span>
+
+        <span class="cp-key">
+          <button class="cp-sq" id="loopToggle" type="button" aria-pressed="false"
+                  title="Loop the marked region (Shift+L). Drag the ruler to mark one."
+                  aria-label="Loop the marked region">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.6" stroke-linecap="square" aria-hidden="true">
+              <path d="M8.6 4.8H4.6v14.4h4M15.4 4.8h4v14.4h-4"/>
+              <path d="M8.2 12h6.2"/>
+              <path d="M12.9 9.2 16.4 12l-3.5 2.8z" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <span class="cp-key-label">Loop</span>
+        </span>
+      </div>
+
+      <div class="cp-level">
+        <div class="cp-level-strip">
+          <div class="cp-level-row">
+            <button class="cp-sq cp-mute" id="muteBtn" type="button"
+                    title="Mute (M)" aria-label="Mute">
+              <svg class="cp-icon-volume" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="square" aria-hidden="true">
+                <path d="M4 9.4h3.2L12 5.4v13.2l-4.8-4H4z" fill="currentColor" stroke="none"/>
+                <path d="M15.4 9.2a4.2 4.2 0 0 1 0 5.6M18 6.6a7.8 7.8 0 0 1 0 10.8"/>
+              </svg>
+              <svg class="cp-icon-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linecap="square" aria-hidden="true">
+                <path d="M4 9.4h3.2L12 5.4v13.2l-4.8-4H4z" fill="currentColor" stroke="none"/>
+                <path d="M15.8 9.8l4.4 4.4M20.2 9.8l-4.4 4.4"/>
+              </svg>
+            </button>
+            <label class="cp-sr-only" for="volume">Volume</label>
+            <!-- The fader runs in a scored slot with scale marks, not on a bare track. -->
+            <span class="cp-fader">
+              <input type="range" id="volume" min="0" max="1" step="0.01" value="1" title="Level">
+            </span>
+            <span class="cp-level-value" id="levelValue">100</span>
+          </div>
+          <span class="cp-engraved">Level</span>
         </div>
       </div>
     </div>
 
-    <div class="cp-error" id="errorState">
-      <div class="cp-error-title">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-          <circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.2v.1"/>
+    <div class="cp-row cp-data-line">
+      <div class="cp-fields">
+        <span class="cp-field"><span class="cp-engraved">Fmt</span><b id="chipFormat"></b></span>
+        <span class="cp-field"><span class="cp-engraved">Audio</span><b id="chipLayout"></b></span>
+        <span class="cp-field"><span class="cp-engraved">Chunks</span><b id="chipChunks"></b></span>
+        <span class="cp-field"><span class="cp-engraved">Head</span><b id="fieldChunk"></b></span>
+        <span class="cp-field"><span class="cp-engraved">Ring</span><b id="fieldRing"></b></span>
+        <span class="cp-field" id="fieldUnderrunWrap">
+          <span class="cp-engraved">Underrun</span><b id="fieldUnderrun"></b>
+        </span>
+      </div>
+      <button class="cp-diag-key" id="inspectorToggle" type="button"
+              aria-expanded="false" aria-controls="inspector">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.6" stroke-linecap="square" aria-hidden="true">
+          <path d="M4 7h4M12 7h8M4 12h9M17 12h3M4 17h6M14 17h6"/>
+          <path d="M9 5.4h2.2v3.2H9zM13.4 10.4h2.2v3.2h-2.2zM10.6 15.4h2.2v3.2h-2.2z"
+                fill="currentColor" stroke="none"/>
         </svg>
-        Playback stream unavailable
-      </div>
-      <div class="cp-error-message" id="errorMessage"></div>
-      <div class="cp-error-hint">
-        The player keeps retrying. Check that FFmpeg is installed and that the playback
-        server is reachable — details are in diagnostics.
-      </div>
-      <div class="cp-error-actions">
-        <button class="cp-btn" id="errorRetry" type="button">Retry now</button>
-        <button class="cp-btn" id="errorDiagnostics" type="button">Open diagnostics</button>
-      </div>
+        <span class="cp-engraved">Diagnostics</span>
+      </button>
     </div>
 
-    <div class="cp-empty" id="emptyState">
-      <div class="cp-empty-title">No media loaded</div>
-      Open an audio file, or pick <b>CP's Nice Player</b> from the editor title bar or the
-      <b>Open With…</b> menu.
-    </div>
-
-    <section class="cp-inspector" id="inspector" hidden>
-      <div class="cp-inspector-section">
-        <div class="cp-inspector-head">
-          <span class="cp-inspector-title">Playback server</span>
-          <div class="cp-inspector-actions">
+    <section class="cp-bays" id="inspector" hidden>
+      <div class="cp-bay">
+        <div class="cp-bay-head">
+          <span class="cp-engraved">Playback server</span>
+          <div class="cp-bay-actions">
             <button class="cp-btn" id="serverRefresh" type="button">Refresh</button>
             <button class="cp-btn" id="serverRestart" type="button">Restart</button>
           </div>
         </div>
         <dl class="cp-grid" id="serverGrid"></dl>
       </div>
-      <div class="cp-inspector-section">
-        <div class="cp-inspector-head"><span class="cp-inspector-title">Playback</span></div>
+      <div class="cp-bay">
+        <div class="cp-bay-head"><span class="cp-engraved">Playback</span></div>
         <dl class="cp-grid" id="playbackGrid"></dl>
       </div>
-      <div class="cp-inspector-section">
-        <div class="cp-inspector-head"><span class="cp-inspector-title">Event log</span></div>
+      <div class="cp-bay">
+        <div class="cp-bay-head"><span class="cp-engraved">Event log</span></div>
         <ol class="cp-log" id="eventLog"></ol>
       </div>
     </section>

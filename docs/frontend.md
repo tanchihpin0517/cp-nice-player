@@ -470,7 +470,56 @@ Each chunk is a **short self-contained encoded file** for that time range (Ogg, 
 
 - `loadMedia` provides `serverUrl` + `audioId`; all fetches append `?audioId=${audioId}`
 - `chunkfinished` and `decodefinished` events (with `bytes` or `elapsedMs` / `wsolaShiftSamples`); the event log formats them as `fetch chunk=N bytes=<size>` and `decode chunk=N time=<ms>ms(<pct>%) wsola=<ms>ms(<samples>)`.
-- Debug panel: playback path, buffer/chunk state, ring stats, and a combined `audio` layout row (`Nch @ rate Hz`).
+- Diagnostics bays: playback path, buffer/chunk state, ring stats, locators, and a combined `audio` layout row (`Nch @ rate Hz`).
+
+### The player surface
+
+The UI is a **transport bridge**: one plate whose rows are divided by scored hairlines. Its design
+system is recorded in [DESIGN.md](../DESIGN.md) and its strategy in
+`.impeccable/surfaces/media-player-player-html.md`.
+
+| Row | Owns |
+| --- | --- |
+| Nameplate | the filename |
+| Status band | one line saying the single currently-true state; on `data-state='error'` it also carries the message and the `Retry now` / `Server status` keys, so a failure is stated once and nothing else grows a panel to repeat it |
+| Instrument face | one canvas, three registers (below), plus the `BUFFER` key and the locator readout |
+| Bridge | the counter in its aperture, five lamp keys (`RTZ`, `−10`, `PLAY`, `+10`, `LOOP`) in a milled channel, the level fader in a scored slot |
+| Data line | the machine's whole identity on one engraved line, and the diagnostics latch |
+| Bays | server / playback / event log, latched open from the data line |
+
+`waveform.js` draws all three registers of the face on a single canvas:
+
+| Register | Height | Content |
+| --- | --- | --- |
+| Ruler | 26px | three-level engraved tick hierarchy, time numerals, the loop bar, locator feet, the playhead index |
+| Tape | flexible | mirrored peak bars at a 2px pitch between two guide rails; past is full-strength foreground, future is faint foreground, unread is a constant low band |
+| Chunks | 10px | the buffer rasterised **per screen pixel** — decoded / fetching / unread |
+
+The accent is spent in exactly two places, the playhead and the chunk register, so the
+tape's coloured extent can never be misread as the buffered extent.
+
+The chunk register is rasterised by pixel rather than by chunk on purpose: a thousand chunks in a
+thousand pixels means sub-pixel cells, and rounding each one up would overstate how much is buffered.
+
+**Locators and looping** live in `playerView.js`, not in the engine: a loop is a seek back to the in
+point when `timeupdate` passes the out point. `regionAtY()` splits the two pointer gestures — dragging
+the **ruler** marks a region, dragging the **tape** seeks.
+
+| Key | Action |
+| --- | --- |
+| `Space` / `K` | play / pause |
+| `J` / `L` | ∓10s |
+| `M` | mute |
+| `[` / `]` | set the in / out locator at the playhead |
+| `\` | clear the locators |
+| `Shift+L` | latch the loop (needs a region) |
+| arrows (face focused) | 5s, `Shift` 30s, `Alt` 0.1s |
+
+Every colour resolves from a `--vscode-*` token, including the canvas colours, which
+`waveform.js` reads through `getComputedStyle` and re-reads on `refreshTheme()`. The
+plate spends none of the theme's own text contrast: it uses the editor background
+directly, puts no tint behind small text, and resolves `--cp-muted` to the foreground —
+see [the design notes](design/player/README.md) for the measurements behind that.
 
 ### Server status reporting
 

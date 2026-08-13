@@ -8,7 +8,9 @@ interface Bar {
 
 /**
  * Canvas stub that records the bars the waveform draws, so the drawing rules can
- * be asserted without a real 2D context.
+ * be asserted without a real 2D context. Bars are fillRect calls — the tape is
+ * drawn as square 1px columns rather than rounded ones — and roundRect is still
+ * recorded so a future rounded mark does not silently escape these tests.
  */
 function recordingCanvas() {
 	const bars: Bar[] = [];
@@ -27,12 +29,19 @@ function recordingCanvas() {
 		beginPath: () => undefined,
 		moveTo: () => undefined,
 		lineTo: () => undefined,
+		closePath: () => undefined,
 		stroke: () => undefined,
 		arc: () => undefined,
 		save: () => undefined,
 		restore: () => undefined,
 		clip: () => undefined,
-		fillRect: () => undefined,
+		measureText: () => ({ width: 24 }),
+		fillText: () => undefined,
+		font: '',
+		textBaseline: '',
+		fillRect: (x: number, _y: number, _w: number, h: number) => {
+			bars.push({ fill: fillStyle, x, height: h });
+		},
 		roundRect: (x: number, _y: number, _w: number, h: number) => {
 			pending = { x, height: h };
 		},
@@ -61,7 +70,9 @@ describe('WaveformView', () => {
 		setDuration(duration: number): void;
 		setProgress(time: number): void;
 		setBuffer(buffer: Record<string, unknown>): void;
+		setLocators(locators: Record<string, number | null>): void;
 		timeAtX(x: number): number;
+		regionAtY(y: number): string;
 	};
 
 	beforeAll(async () => {
@@ -79,6 +90,7 @@ describe('WaveformView', () => {
 					'--cp-rail-empty': 'RAIL_EMPTY',
 					'--cp-rail-decoded': 'RAIL_DECODED',
 					'--cp-rail-inflight': 'RAIL_INFLIGHT',
+					'--cp-mark': 'MARK',
 				};
 				return colors[name] ?? '';
 			},
@@ -97,8 +109,8 @@ describe('WaveformView', () => {
 		view.setBuffer({ chunkCount: 0, decoded: [], inflight: [] });
 		view.setPeaks(peaks);
 
-		// Every setter repaints, so keep only the last frame — and only the
-		// waveform bars, not the rail or playhead drawn alongside them.
+		// Every setter repaints, so keep only the last frame — and only the tape
+		// columns, not the ruler, rails or chunk field drawn alongside them.
 		bars.length = 0;
 		view.setProgress(currentTime);
 		return bars.filter((bar) => WAVE_COLORS.includes(bar.fill));
@@ -110,15 +122,22 @@ describe('WaveformView', () => {
 		expect(bars.every((bar) => bar.fill === 'GHOST')).toBe(true);
 	});
 
-	it('draws measured silence flat but in the waveform colour, not the ghost colour', () => {
+	/**
+	 * Unread tape is a visible band rather than a flat line: drawing it at zero
+	 * made a freshly opened file look like a player that had failed to load. It is
+	 * a constant height, so it can never be mistaken for a measurement, and a
+	 * decoded silence stays flat in the waveform colour.
+	 */
+	it('draws unread tape as a constant band and measured silence flat', () => {
 		const silent = drawWith(new Float32Array(64).fill(0));
-		const undecoded = drawWith(new Float32Array(64).fill(-1));
+		const unread = drawWith(new Float32Array(64).fill(-1));
 
-		// Same height — silence and "not seen yet" are both flat...
-		expect(silent[0].height).toBe(undecoded[0].height);
-		// ...and told apart by colour alone.
 		expect(silent.every((bar) => bar.fill === 'FUTURE')).toBe(true);
-		expect(undecoded.every((bar) => bar.fill === 'GHOST')).toBe(true);
+		expect(unread.every((bar) => bar.fill === 'GHOST')).toBe(true);
+
+		// Every unread column is the same height, and taller than real silence.
+		expect(new Set(unread.map((bar) => bar.height)).size).toBe(1);
+		expect(unread[0].height).toBeGreaterThan(silent[0].height);
 	});
 
 	it('scales bar height with the measured peak', () => {
@@ -152,5 +171,27 @@ describe('WaveformView', () => {
 		expect(view.timeAtX(200)).toBeCloseTo(50);
 		expect(view.timeAtX(-40)).toBe(0);
 		expect(view.timeAtX(9999)).toBe(100);
+	});
+
+	/** The two gestures on this surface are split by register, so this has to be exact. */
+	it('reports which register a pointer is over', () => {
+		const { canvas } = recordingCanvas();
+		const view = new WaveformView(canvas);
+		expect(view.regionAtY(4)).toBe('ruler');
+		expect(view.regionAtY(70)).toBe('tape');
+		expect(view.regionAtY(130)).toBe('chunks');
+	});
+
+	it('marks the loop region with the marker colour', () => {
+		const { canvas, bars } = recordingCanvas();
+		const view = new WaveformView(canvas);
+		view.setDuration(100);
+		view.setBuffer({ chunkCount: 0, decoded: [], inflight: [] });
+		bars.length = 0;
+		view.setLocators({ in: 20, out: 40 });
+
+		const marks = bars.filter((bar) => bar.fill === 'MARK');
+		// One bar across the ruler, plus a hairline down the tape per edge.
+		expect(marks.length).toBeGreaterThanOrEqual(3);
 	});
 });

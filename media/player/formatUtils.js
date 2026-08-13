@@ -7,6 +7,21 @@ function formatTime(seconds) {
   return mins + ':' + String(secs).padStart(2, '0');
 }
 
+/**
+ * Transport counter: milliseconds are visible because judging a chunk seam or a
+ * click means naming the moment it happens, not the second it happens in.
+ */
+function formatClock(seconds) {
+  if (!Number.isFinite(seconds)) {
+    return '—';
+  }
+  const total = Math.max(0, seconds);
+  const mins = Math.floor(total / 60);
+  const secs = Math.floor(total % 60);
+  const ms = Math.floor((total - Math.floor(total)) * 1000);
+  return mins + ':' + String(secs).padStart(2, '0') + '.' + String(ms).padStart(3, '0');
+}
+
 function formatChunkBytes(bytes) {
   if (bytes < 1024) {
     return bytes + 'B';
@@ -50,6 +65,7 @@ function escapeHtml(str) {
 
 if (typeof window !== 'undefined') {
   window.formatTime = formatTime;
+  window.formatClock = formatClock;
   window.formatChunkBytes = formatChunkBytes;
   window.formatAudioLayout = formatAudioLayout;
   window.formatWsolaShift = formatWsolaShift;
@@ -59,6 +75,7 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     formatTime,
+    formatClock,
     formatChunkBytes,
     formatAudioLayout,
     formatWsolaShift,

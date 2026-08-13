@@ -4,6 +4,7 @@ import {
 	escapeHtml,
 	formatAudioLayout,
 	formatChunkBytes,
+	formatClock,
 	formatTime,
 	formatWsolaShift,
 } from '../../../media/player/formatUtils.js';
@@ -18,6 +19,22 @@ describe('formatUtils', () => {
 		it('returns em dash for non-finite values', () => {
 			expect(formatTime(Number.NaN)).toBe('—');
 			expect(formatTime(Number.POSITIVE_INFINITY)).toBe('—');
+		});
+	});
+
+	describe('formatClock', () => {
+		it('formats minutes, seconds and milliseconds', () => {
+			expect(formatClock(0)).toBe('0:00.000');
+			expect(formatClock(83.4567)).toBe('1:23.456');
+			expect(formatClock(600)).toBe('10:00.000');
+		});
+
+		it('never reports a negative counter', () => {
+			expect(formatClock(-2)).toBe('0:00.000');
+		});
+
+		it('returns em dash for non-finite values', () => {
+			expect(formatClock(Number.NaN)).toBe('—');
 		});
 	});
 

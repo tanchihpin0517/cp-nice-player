@@ -1,13 +1,37 @@
 /*
- * Waveform overview + buffer rail.
+ * The instrument face.
  *
- * Draws two things on one canvas:
- *   1. mirrored peak bars for the whole track, coloured past/future by playhead
- *   2. a thin rail underneath showing which chunks are decoded / in flight / absent
+ * One canvas, three stacked registers, drawn as a single machined window rather
+ * than three separate widgets:
+ *
+ *   1. RULER  — an engraved time scale with a three-level tick hierarchy, the
+ *               locator bracket flags, and the playhead index.
+ *   2. TAPE   — mirrored peak bars between two guide rails, coloured past /
+ *               future by the playhead, ghosted where nothing has been decoded.
+ *   3. CHUNKS — the buffer as a pixel-resolution data field: one column per
+ *               screen pixel, decoded / fetching / unread.
+ *
+ * The ruler and the tape answer different questions, which is why both exist:
+ * the tape says what has been heard this session and accumulates, the chunk
+ * field says what is in memory right now and is a handful of chunks wide.
  *
  * Colours are pulled from the stylesheet's custom properties so the canvas
  * follows the active VS Code theme. Call refreshTheme() after a theme change.
  */
+
+/** Time steps the ruler is allowed to use, so ticks land on readable values. */
+const TICK_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
+const RULER_H = 26;
+const CHUNK_H = 10;
+/** 1px bar + 1px gap: the field is a measurement, not a decoration. */
+const BAR_PITCH = 2;
+/**
+ * Half-height of a column nothing has been decoded for. Blank tape is still
+ * visibly tape: drawing unread regions at zero made a freshly opened file look
+ * like a player that had failed to load rather than one that had not been heard.
+ */
+const UNREAD_HALF = 3;
+
 class WaveformView {
   constructor(canvas) {
     this.canvas = canvas;
@@ -16,6 +40,8 @@ class WaveformView {
     this.duration = 0;
     this.currentTime = 0;
     this.hoverTime = null;
+    this.locators = { in: null, out: null };
+    this.loopActive = false;
     this.buffer = { chunkCount: 0, chunkDurationSec: 1, decoded: [], inflight: [] };
     this.cssWidth = 0;
     this.cssHeight = 0;
@@ -43,12 +69,20 @@ class WaveformView {
     const read = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
     this.colors = {
       past: read('--cp-wave-past', '#4daafc'),
-      future: read('--cp-wave-future', 'rgba(204,204,204,0.34)'),
-      ghost: read('--cp-wave-ghost', 'rgba(204,204,204,0.13)'),
+      future: read('--cp-wave-future', 'rgba(204,204,204,0.42)'),
+      ghost: read('--cp-wave-ghost', 'rgba(204,204,204,0.12)'),
       playhead: read('--cp-wave-playhead', '#cccccc'),
-      railEmpty: read('--cp-rail-empty', 'rgba(204,204,204,0.1)'),
-      railDecoded: read('--cp-rail-decoded', 'rgba(77,170,252,0.55)'),
-      railInflight: read('--cp-rail-inflight', 'rgba(204,167,0,0.6)'),
+      railEmpty: read('--cp-rail-empty', 'rgba(204,204,204,0.09)'),
+      railDecoded: read('--cp-rail-decoded', 'rgba(77,170,252,0.62)'),
+      railInflight: read('--cp-rail-inflight', '#cca700'),
+      tick: read('--cp-tick', 'rgba(204,204,204,0.24)'),
+      tickMajor: read('--cp-tick-major', 'rgba(204,204,204,0.46)'),
+      label: read('--cp-wave-label', 'rgba(204,204,204,0.7)'),
+      score: read('--cp-score', 'rgba(204,204,204,0.15)'),
+      guide: read('--cp-guide', 'rgba(204,204,204,0.2)'),
+      mark: read('--cp-mark', '#cccccc'),
+      markWash: read('--cp-mark-wash', 'rgba(204,204,204,0.07)'),
+      mono: read('--cp-mono', 'ui-monospace, Menlo, monospace'),
     };
     this.render();
   }
@@ -87,19 +121,30 @@ class WaveformView {
     this.render();
   }
 
+  setLocators(locators) {
+    this.locators = { ...this.locators, ...locators };
+    this.render();
+  }
+
+  setLoopActive(active) {
+    this.loopActive = Boolean(active);
+    this.render();
+  }
+
   setBuffer(buffer) {
     this.buffer = { ...this.buffer, ...buffer };
-    // In-flight chunks animate, so keep a frame loop alive only while they exist.
+    // Fetching chunks blink, so keep a frame loop alive only while they exist.
     this.setAnimating(this.buffer.inflight.length > 0);
     this.render();
   }
 
   setAnimating(on) {
-    if (on === this.animating) {
+    const wanted = on && !this._reducedMotion();
+    if (wanted === this.animating) {
       return;
     }
-    this.animating = on;
-    if (on) {
+    this.animating = wanted;
+    if (wanted) {
       this._frame = requestAnimationFrame(this._loopBound);
     } else if (this._frame != null) {
       cancelAnimationFrame(this._frame);
@@ -107,6 +152,13 @@ class WaveformView {
     }
   }
 
+  _reducedMotion() {
+    return typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  /** The time axis spans the full canvas, so a click lands where it looks. */
   timeAtX(x) {
     if (!this.cssWidth || !this.duration) {
       return 0;
@@ -115,8 +167,30 @@ class WaveformView {
     return ratio * this.duration;
   }
 
+  xAtTime(seconds) {
+    if (!this.duration) {
+      return 0;
+    }
+    const ratio = Math.min(1, Math.max(0, seconds / this.duration));
+    return ratio * this.cssWidth;
+  }
+
+  /**
+   * Which register a pointer is over. Dragging the ruler marks locators;
+   * dragging the tape seeks. Two gestures on one surface need this to be exact.
+   */
+  regionAtY(y) {
+    if (y <= RULER_H) {
+      return 'ruler';
+    }
+    if (y >= this.cssHeight - CHUNK_H) {
+      return 'chunks';
+    }
+    return 'tape';
+  }
+
   _loop() {
-    this._phase = (this._phase + 0.9) % 24;
+    this._phase += 0.045;
     this.render();
     if (this.animating) {
       this._frame = requestAnimationFrame(this._loopBound);
@@ -133,35 +207,124 @@ class WaveformView {
 
     ctx.clearRect(0, 0, w, h);
 
-    const railH = 5;
-    const railGap = 8;
-    const padX = 12;
-    const padTop = 14;
-    const waveBottom = h - railH - railGap - 10;
-    const waveH = waveBottom - padTop;
-    const mid = padTop + waveH / 2;
-    const innerW = w - padX * 2;
-
-    if (innerW <= 0 || waveH <= 0) {
+    const tapeTop = RULER_H + 1;
+    const tapeBottom = h - CHUNK_H - 1;
+    if (tapeBottom - tapeTop < 12) {
       return;
     }
 
-    this._drawBars(padX, innerW, mid, waveH / 2);
-    this._drawRail(padX, innerW, h - railH - 10, railH);
-    this._drawPlayhead(padX, innerW, padTop, waveBottom);
+    this._drawLoopRegion(tapeTop, tapeBottom);
+    this._drawRuler(w, tapeTop);
+    this._drawTape(tapeTop, tapeBottom);
+    this._drawChunkField(w, h - CHUNK_H, CHUNK_H);
+    this._drawLocators(tapeTop, tapeBottom);
+    this._drawPlayhead(tapeTop, tapeBottom);
   }
 
-  _drawBars(x0, width, mid, halfH) {
+  // ---------------------------------------------------------------- ruler
+
+  /** Smallest allowed step whose spacing is at least minPx wide. */
+  _pickStep(minPx) {
+    const pxPerSec = this.duration > 0 ? this.cssWidth / this.duration : 0;
+    if (!pxPerSec) {
+      return 0;
+    }
+    for (const step of TICK_STEPS) {
+      if (step * pxPerSec >= minPx) {
+        return step;
+      }
+    }
+    return TICK_STEPS[TICK_STEPS.length - 1];
+  }
+
+  _drawRuler(w, tapeTop) {
     const { ctx } = this;
-    const barW = 2;
-    const gap = 1.5;
-    const step = barW + gap;
-    const cols = Math.max(1, Math.floor(width / step));
+
+    // The scored line under the ruler is drawn whether or not there is tape, so
+    // an empty machine still reads as a machine.
+    ctx.fillStyle = this.colors.score;
+    ctx.fillRect(0, tapeTop - 1, w, 1);
+
+    if (!this.duration) {
+      return;
+    }
+
+    const major = this._pickStep(78);
+    const mid = this._pickStep(26);
+    const minor = this._pickStep(7);
+    const base = tapeTop - 1;
+
+    const drawTicks = (step, height, color) => {
+      if (!step) {
+        return;
+      }
+      ctx.fillStyle = color;
+      for (let t = 0; t <= this.duration + 1e-6; t += step) {
+        const x = Math.round(this.xAtTime(t));
+        if (x > w) {
+          break;
+        }
+        ctx.fillRect(Math.min(x, w - 1), base - height, 1, height);
+      }
+    };
+
+    if (minor && minor < mid) {
+      drawTicks(minor, 4, this.colors.tick);
+    }
+    if (mid && mid < major) {
+      drawTicks(mid, 7, this.colors.tick);
+    }
+    drawTicks(major, 12, this.colors.tickMajor);
+
+    // Numerals sit above their tick, clamped inside the window so the first and
+    // last are never half-cropped.
+    ctx.fillStyle = this.colors.label;
+    ctx.font = '500 10px ' + this.colors.mono;
+    ctx.textBaseline = 'top';
+    for (let t = major; t < this.duration - major * 0.5; t += major) {
+      const label = this._tickLabel(t, major);
+      const width = ctx.measureText(label).width;
+      const x = Math.min(w - width - 3, Math.max(3, this.xAtTime(t) + 4));
+      ctx.fillText(label, x, 3);
+    }
+  }
+
+  _tickLabel(seconds, step) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (step < 1) {
+      return mins + ':' + secs.toFixed(1).padStart(4, '0');
+    }
+    return mins + ':' + String(Math.round(secs)).padStart(2, '0');
+  }
+
+  // ----------------------------------------------------------------- tape
+
+  _drawTape(top, bottom) {
+    const { ctx } = this;
+    const w = this.cssWidth;
+    const mid = (top + bottom) / 2;
+    const halfH = (bottom - top) / 2 - 3;
+
+    // Guide rails: the tape runs between them.
+    ctx.fillStyle = this.colors.guide;
+    ctx.fillRect(0, top, w, 1);
+    ctx.fillRect(0, bottom - 1, w, 1);
+
+    // Centre line, so a silent passage still has an axis to read against.
+    ctx.fillStyle = this.colors.score;
+    ctx.fillRect(0, Math.round(mid), w, 1);
+
+    if (halfH <= 2) {
+      return;
+    }
+
+    const cols = Math.max(1, Math.floor(w / BAR_PITCH));
     const progress = this.duration > 0 ? this.currentTime / this.duration : 0;
     const playedCols = progress * cols;
 
-    // Peaks arrive chunk by chunk as the engine decodes, so a column is in one of
-    // two states: measured, or not seen yet. Unmeasured columns draw as a low
+    // Peaks arrive chunk by chunk as the engine decodes, so a column is in one
+    // of two states: measured, or not seen yet. Unmeasured columns draw as a low
     // ghost stub — visibly a placeholder, and distinct from a measured silence,
     // which draws at the same height in the normal colour.
     for (let i = 0; i < cols; i += 1) {
@@ -169,8 +332,10 @@ class WaveformView {
       const known = peak >= 0;
       // Gamma lift: quiet passages stay visible instead of collapsing to a line.
       const amp = known ? Math.pow(peak, 0.72) : 0;
-      const barH = Math.max(1.5, amp * halfH);
-      const x = x0 + i * step;
+      const barH = known
+        ? Math.max(1, amp * halfH)
+        : Math.min(UNREAD_HALF, halfH);
+      const x = i * BAR_PITCH;
 
       if (!known) {
         ctx.fillStyle = this.colors.ghost;
@@ -178,9 +343,7 @@ class WaveformView {
         ctx.fillStyle = i < playedCols ? this.colors.past : this.colors.future;
       }
 
-      ctx.beginPath();
-      ctx.roundRect(x, mid - barH, barW, barH * 2, 1);
-      ctx.fill();
+      ctx.fillRect(x, Math.round(mid - barH), 1, Math.max(1, Math.round(barH * 2)));
     }
   }
 
@@ -200,81 +363,137 @@ class WaveformView {
     return peak;
   }
 
-  _drawRail(x0, width, y, height) {
+  // --------------------------------------------------------- chunk field
+
+  /**
+   * Rasterised per screen pixel rather than per chunk: a thousand chunks in a
+   * thousand pixels means sub-pixel cells, and rounding each one up turns the
+   * whole field into a lie about how much is buffered.
+   */
+  _drawChunkField(w, y, height) {
     const { ctx } = this;
     const { chunkCount, decoded, inflight } = this.buffer;
 
+    ctx.fillStyle = this.colors.score;
+    ctx.fillRect(0, y - 1, w, 1);
+
     ctx.fillStyle = this.colors.railEmpty;
-    ctx.beginPath();
-    ctx.roundRect(x0, y, width, height, height / 2);
-    ctx.fill();
+    ctx.fillRect(0, y, w, height);
 
     if (!chunkCount) {
       return;
     }
 
-    const rangeRect = (start, end) => {
-      const x = x0 + (start / chunkCount) * width;
-      // The buffer window is a few chunks out of hundreds, so a range can round
-      // to sub-pixel width. Floor it at something you can actually see.
-      const w = Math.max(4, ((end + 1 - start) / chunkCount) * width);
-      return [x, Math.min(w, x0 + width - x)];
-    };
-
-    ctx.fillStyle = this.colors.railDecoded;
-    for (const [start, end] of decoded) {
-      const [x, w] = rangeRect(start, end);
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, height, height / 2);
-      ctx.fill();
-    }
-
-    // In-flight chunks get moving hatching so "fetching now" reads as motion.
-    for (const [start, end] of inflight) {
-      const [x, w] = rangeRect(start, end);
-      ctx.save();
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, height, height / 2);
-      ctx.clip();
-      ctx.fillStyle = this.colors.railInflight;
-      ctx.globalAlpha = 0.35;
-      ctx.fillRect(x, y, w, height);
-      ctx.globalAlpha = 1;
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = this.colors.railInflight;
-      for (let sx = x - height * 2 - this._phase; sx < x + w + height * 2; sx += 12) {
-        ctx.beginPath();
-        ctx.moveTo(sx, y + height + 2);
-        ctx.lineTo(sx + height + 4, y - 2);
-        ctx.stroke();
+    const cols = Math.max(1, Math.ceil(w));
+    const state = new Uint8Array(cols);
+    const paint = (ranges, value) => {
+      for (const [start, end] of ranges) {
+        const from = Math.max(0, Math.floor((start / chunkCount) * cols));
+        const to = Math.min(cols, Math.max(from + 1, Math.ceil(((end + 1) / chunkCount) * cols)));
+        for (let i = from; i < to; i += 1) {
+          state[i] = value;
+        }
       }
-      ctx.restore();
+    };
+    paint(decoded, 1);
+    // Fetching wins the pixel: it is the state the listener is waiting on.
+    paint(inflight, 2);
+
+    // Blink is the tape machine's working lamp, and the only motion here.
+    const blink = this.animating ? 0.6 + 0.4 * Math.sin(this._phase * 4) : 1;
+
+    let runStart = 0;
+    for (let i = 1; i <= cols; i += 1) {
+      if (i === cols || state[i] !== state[runStart]) {
+        const value = state[runStart];
+        if (value) {
+          ctx.globalAlpha = value === 2 ? blink : 1;
+          ctx.fillStyle = value === 2 ? this.colors.railInflight : this.colors.railDecoded;
+          ctx.fillRect(runStart, y, i - runStart, height);
+          ctx.globalAlpha = 1;
+        }
+        runStart = i;
+      }
     }
   }
 
-  _drawPlayhead(x0, width, top, bottom) {
+  // -------------------------------------------------------------- markers
+
+  _hasRegion() {
+    const { in: from, out: to } = this.locators;
+    return from != null && to != null && to > from;
+  }
+
+  _drawLoopRegion(top, bottom) {
+    if (!this._hasRegion() || !this.duration) {
+      return;
+    }
+    const { ctx } = this;
+    const x0 = this.xAtTime(this.locators.in);
+    const x1 = this.xAtTime(this.locators.out);
+    ctx.fillStyle = this.colors.markWash;
+    ctx.fillRect(x0, top, Math.max(1, x1 - x0), bottom - top);
+  }
+
+  /**
+   * A locator is a hairline down the tape with a foot in the ruler, and the
+   * region between two of them carries a bar across the ruler — solid while the
+   * loop is latched, a hairline while it is only marked. Markers are told apart
+   * from the playhead by form rather than by hue, because the palette belongs to
+   * the theme and cannot be spent on a second marker colour.
+   */
+  _drawLocators(top, bottom) {
+    if (!this.duration) {
+      return;
+    }
+    const { ctx } = this;
+    const barY = RULER_H - 13;
+
+    if (this._hasRegion()) {
+      const x0 = Math.round(this.xAtTime(this.locators.in));
+      const x1 = Math.round(this.xAtTime(this.locators.out));
+      ctx.fillStyle = this.colors.mark;
+      ctx.fillRect(x0, barY, Math.max(2, x1 - x0), this.loopActive ? 3 : 1);
+    }
+
+    const drawEdge = (seconds) => {
+      if (seconds == null) {
+        return;
+      }
+      const x = Math.round(Math.min(this.cssWidth - 1, Math.max(0, this.xAtTime(seconds))));
+      ctx.fillStyle = this.colors.mark;
+      ctx.fillRect(x, top, 1, bottom - top);
+      ctx.fillRect(x, barY, 1, 13);
+    };
+
+    drawEdge(this.locators.in);
+    drawEdge(this.locators.out);
+  }
+
+  _drawPlayhead(top, bottom) {
     const { ctx } = this;
     if (!this.duration) {
       return;
     }
 
     if (this.hoverTime != null) {
-      const hx = x0 + (this.hoverTime / this.duration) * width;
-      ctx.strokeStyle = this.colors.future;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(Math.round(hx) + 0.5, top - 6);
-      ctx.lineTo(Math.round(hx) + 0.5, bottom + 6);
-      ctx.stroke();
+      const hx = Math.round(this.xAtTime(this.hoverTime));
+      ctx.fillStyle = this.colors.future;
+      for (let y = top; y < bottom; y += 4) {
+        ctx.fillRect(Math.min(hx, this.cssWidth - 1), y, 1, 2);
+      }
     }
 
-    const x = x0 + (this.currentTime / this.duration) * width;
+    const x = Math.min(this.cssWidth - 2, Math.max(0, this.xAtTime(this.currentTime)));
     ctx.fillStyle = this.colors.playhead;
+    ctx.fillRect(Math.round(x), top, 2, bottom - top);
+
+    // The head index: a solid flag hanging in the ruler above the tape.
     ctx.beginPath();
-    ctx.roundRect(x - 1, top - 8, 2, bottom - top + 16, 1);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x, top - 9, 3.5, 0, Math.PI * 2);
+    ctx.moveTo(Math.round(x) - 4, RULER_H - 11);
+    ctx.lineTo(Math.round(x) + 6, RULER_H - 11);
+    ctx.lineTo(Math.round(x) + 1, RULER_H - 1);
+    ctx.closePath();
     ctx.fill();
   }
 }
