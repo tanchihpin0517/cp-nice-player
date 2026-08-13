@@ -18,6 +18,8 @@ describe('StreamingAudioEngine', () => {
 		decodedChunks: Set<number>;
 		_storeEncodedChunk: (index: number, bytes: ArrayBuffer) => void;
 		_getPinnedChunkRange: () => { min: number; max: number };
+		_decodeAndWriteChunk: (index: number, generation: number) => Promise<number | null>;
+		loadGeneration: number;
 	};
 
 	let StreamingAudioEngine: new () => EngineInstance;
@@ -104,6 +106,26 @@ describe('StreamingAudioEngine', () => {
 		expect(engine.getCurrentTime()).toBe(2.5);
 		expect(engine.decodedChunks.size).toBe(0);
 		expect(abortSpy).toHaveBeenCalled();
+	});
+
+	it('reports an amplitude envelope for every chunk it decodes', async () => {
+		// The waveform overview is built from these: no second read of the source.
+		await engine.load(serverUrl, 'abcd1234');
+
+		const decoded: Array<{ chunkIndex: number; peaks: Float32Array }> = [];
+		engine.addEventListener('decodefinished', (event) => {
+			decoded.push((event as CustomEvent).detail);
+		});
+
+		engine._storeEncodedChunk(0, new ArrayBuffer(128));
+		await engine._decodeAndWriteChunk(0, engine.loadGeneration);
+
+		expect(decoded).toHaveLength(1);
+		expect(decoded[0].chunkIndex).toBe(0);
+		expect(decoded[0].peaks).toBeInstanceOf(Float32Array);
+		expect(decoded[0].peaks.length).toBe(16);
+		// The mock decodes to a full-scale sine, so every bucket carries signal.
+		expect(Array.from(decoded[0].peaks).every((peak) => peak > 0 && peak <= 1)).toBe(true);
 	});
 
 	it('retries index fetch after failure', async () => {

@@ -1,9 +1,11 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	baseDiagnostics,
 	createMockEngine,
 	loadMediaMessage,
 	serverStatusMessage,
 	setupPlayerDom,
+	stubCanvasEnvironment,
 	type MockEngine,
 } from './helpers/setupPlayerDom';
 
@@ -15,7 +17,10 @@ describe('player.js', () => {
 		setState: ReturnType<typeof vi.fn>;
 	};
 
+	const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+
 	beforeAll(async () => {
+		stubCanvasEnvironment();
 		setupPlayerDom();
 		mockEngine = createMockEngine();
 		mockVscode = {
@@ -32,6 +37,8 @@ describe('player.js', () => {
 		};
 
 		await import('../../../media/player/formatUtils.js');
+		await import('../../../media/player/waveform.js');
+		await import('../../../media/player/playerView.js');
 		await import('../../../media/player/player.js');
 		expect(mockVscode.postMessage).toHaveBeenCalledWith({ type: 'ready' });
 	});
@@ -41,87 +48,99 @@ describe('player.js', () => {
 		mockEngine.play.mockClear();
 		mockEngine.pause.mockClear();
 		mockEngine.seek.mockClear();
-		mockEngine.getDiagnostics.mockReturnValue({
-			paused: true,
-			manifestChannels: 2,
-			manifestSampleRate: 44100,
-			contextSampleRate: 44100,
-			maxEncodedChunks: 64,
-			encodedChunkCount: 2,
-			bufferedChunks: '0-1',
-			contextState: 'running',
-			manifestChunkCount: 5,
-			currentChunkIndex: 1,
-			ringFramesAvailable: 1000,
-			ringFreeFrames: 500,
-			underrunFrames: 0,
-			decodedChunks: '0',
-			fetchInFlight: '—',
-			currentTime: 30,
-			duration: 120,
-		});
+		mockEngine.getDiagnostics.mockReturnValue(baseDiagnostics());
 	});
 
-	it('handles loadMedia message', async () => {
+	async function loadTrack() {
 		window.dispatchEvent(new MessageEvent('message', { data: loadMediaMessage }));
 		await vi.waitFor(() => expect(mockEngine.load).toHaveBeenCalled());
+	}
+
+	it('handles loadMedia message', async () => {
+		await loadTrack();
 
 		expect(mockEngine.load).toHaveBeenCalledWith(
 			loadMediaMessage.serverUrl,
 			loadMediaMessage.audioId,
 			expect.objectContaining({ name: 'track.mp3' }),
 		);
-		expect(document.getElementById('trackName')?.textContent).toBe('track.mp3');
-		expect((document.getElementById('playbackPlayPause') as HTMLButtonElement).disabled).toBe(false);
+		expect(el('trackName').textContent).toBe('track.mp3');
+		expect(el<HTMLButtonElement>('playPause').disabled).toBe(false);
+		expect(el('player').dataset.state).toBe('ready');
+		expect(el('chipFormat').textContent).toBe('OGG');
+		expect(el('chipLayout').textContent).toBe('2ch @ 44100 Hz');
 	});
 
-	it('toggles play and pause from button', async () => {
-		mockEngine.getDiagnostics.mockReturnValue({
-			paused: true,
-			manifestChannels: 2,
-			manifestSampleRate: 44100,
-			currentTime: 0,
-			duration: 120,
-		});
+	it('toggles play and pause from the transport button', async () => {
+		mockEngine.getDiagnostics.mockReturnValue(baseDiagnostics({ paused: true }));
 
-		const button = document.getElementById('playbackPlayPause') as HTMLButtonElement;
-		button.disabled = false;
-		button.click();
+		el('playPause').click();
 		await vi.waitFor(() => expect(mockEngine.play).toHaveBeenCalled());
-		expect(button.textContent).toBe('Pause');
 
-		mockEngine.getDiagnostics.mockReturnValue({
-			paused: false,
-			manifestChannels: 2,
-			manifestSampleRate: 44100,
-			currentTime: 0,
-			duration: 120,
-		});
-		button.click();
+		mockEngine.getDiagnostics.mockReturnValue(baseDiagnostics({ paused: false }));
+		el('playPause').click();
 		await vi.waitFor(() => expect(mockEngine.pause).toHaveBeenCalled());
 	});
 
-	it('does not update seek display during drag', () => {
-		const seek = document.getElementById('playbackSeek') as HTMLInputElement;
-		const currentTime = document.getElementById('playbackCurrentTime') as HTMLSpanElement;
-		seek.disabled = false;
+	it('marks the playing state from engine events', () => {
+		mockEngine.dispatchEngineEvent('playing');
+		expect(el('player').dataset.playing).toBe('true');
+		expect(el('trackStatus').dataset.tone).toBe('live');
 
-		seek.dispatchEvent(new PointerEvent('pointerdown'));
-		seek.value = '0.5';
-		seek.dispatchEvent(new Event('input'));
-		expect(currentTime.textContent).toBe('1:00');
-
-		mockEngine.dispatchEngineEvent('timeupdate', { currentTime: 10, duration: 120 });
-		expect(currentTime.textContent).toBe('1:00');
+		mockEngine.dispatchEngineEvent('pause');
+		expect(el('player').dataset.playing).toBe('false');
 	});
 
-	it('renders debug panel from diagnostics', async () => {
-		window.dispatchEvent(new MessageEvent('message', { data: loadMediaMessage }));
-		await vi.waitFor(() => expect(mockEngine.load).toHaveBeenCalled());
+	it('skips forward and back by ten seconds', async () => {
+		mockEngine.getCurrentTime.mockReturnValue(30);
+		el('skipForward').click();
+		await vi.waitFor(() => expect(mockEngine.seek).toHaveBeenCalledWith(40));
+
+		mockEngine.seek.mockClear();
+		el('skipBack').click();
+		await vi.waitFor(() => expect(mockEngine.seek).toHaveBeenCalledWith(20));
+	});
+
+	it('clamps skipping to the bounds of the track', async () => {
+		mockEngine.getCurrentTime.mockReturnValue(2);
+		el('skipBack').click();
+		await vi.waitFor(() => expect(mockEngine.seek).toHaveBeenCalledWith(0));
+
+		mockEngine.seek.mockClear();
+		mockEngine.getCurrentTime.mockReturnValue(115);
+		el('skipForward').click();
+		await vi.waitFor(() => expect(mockEngine.seek).toHaveBeenCalledWith(120));
+	});
+
+	it('toggles mute', () => {
+		el('muteBtn').click();
+		expect(el('player').dataset.muted).toBe('true');
+		expect(mockEngine.setMuted).toHaveBeenCalledWith(true);
+
+		el('muteBtn').click();
+		expect(el('player').dataset.muted).toBe('false');
+		expect(mockEngine.setMuted).toHaveBeenCalledWith(false);
+	});
+
+	it('does not move the playhead readout while scrubbing the waveform', () => {
+		const wave = el('wave');
+		wave.setAttribute('aria-disabled', 'false');
+		wave.dispatchEvent(new PointerEvent('pointerdown', { clientX: 400, bubbles: true }));
+
+		mockEngine.dispatchEngineEvent('timeupdate', { currentTime: 10, duration: 120 });
+		expect(el('currentTime').textContent).not.toBe('0:10');
+
+		wave.dispatchEvent(new PointerEvent('pointerup', { clientX: 400, bubbles: true }));
+	});
+
+	it('renders playback diagnostics', async () => {
+		await loadTrack();
 		mockEngine.dispatchEngineEvent('ready', { duration: 120 });
-		const grid = document.getElementById('debugGrid');
-		expect(grid?.innerHTML).toContain('2ch @ 44100 Hz');
-		expect(grid?.innerHTML).toContain('playheadSec');
+
+		const grid = el('playbackGrid');
+		expect(grid.innerHTML).toContain('2ch @ 44100 Hz');
+		expect(grid.innerHTML).toContain('index.chunkCount');
+		expect(grid.innerHTML).toContain('/music/track.mp3');
 	});
 
 	it('logs fetch and decode events', () => {
@@ -130,30 +149,31 @@ describe('player.js', () => {
 			chunkIndex: 2,
 			elapsedMs: 12.5,
 			wsolaShiftSamples: 441,
+			peaks: new Float32Array(16).fill(0.5),
 		});
 
-		const log = document.getElementById('debugLog');
-		expect(log?.innerHTML).toContain('chunk=2');
-		expect(log?.innerHTML).toContain('bytes=2.0KB');
-		expect(log?.innerHTML).toContain('decode');
-		expect(log?.innerHTML).toContain('wsola=');
+		const log = el('eventLog');
+		expect(log.innerHTML).toContain('chunk=2');
+		expect(log.innerHTML).toContain('bytes=2.0KB');
+		expect(log.innerHTML).toContain('decode');
+		expect(log.innerHTML).toContain('wsola=');
 	});
 
 	it('shows an unknown server state before the extension reports one', () => {
-		// Rendered at startup, so the panel is never blank even if no status ever arrives.
-		expect(document.getElementById('serverGrid')?.innerHTML).toContain('unknown');
+		// Rendered at startup, so the panel is never blank even if no status arrives.
+		expect(el('serverGrid').innerHTML).toContain('unknown');
 	});
 
 	it('renders server status from the extension', () => {
 		window.dispatchEvent(new MessageEvent('message', { data: serverStatusMessage }));
 
-		const grid = document.getElementById('serverGrid');
-		expect(grid?.innerHTML).toContain('listening');
-		expect(grid?.innerHTML).toContain('https://abc.vscode-cdn.net:8765');
-		expect(grid?.innerHTML).toContain('forwarded');
-		expect(grid?.innerHTML).toContain('ok (12ms)');
-		expect(grid?.innerHTML).toContain('/usr/bin/ffmpeg');
-		expect(grid?.innerHTML).toContain('ogg');
+		const grid = el('serverGrid');
+		expect(grid.innerHTML).toContain('listening');
+		expect(grid.innerHTML).toContain('https://abc.vscode-cdn.net:8765');
+		expect(grid.innerHTML).toContain('forwarded');
+		expect(grid.innerHTML).toContain('ok (12ms)');
+		expect(grid.innerHTML).toContain('/usr/bin/ffmpeg');
+		expect(grid.innerHTML).toContain('ogg');
 	});
 
 	it('marks an unreachable server and its error', () => {
@@ -169,10 +189,10 @@ describe('player.js', () => {
 			},
 		}));
 
-		const grid = document.getElementById('serverGrid');
-		expect(grid?.innerHTML).toContain('failed: ECONNREFUSED');
-		expect(grid?.innerHTML).toContain('bind failed');
-		expect(grid?.innerHTML).toContain('class="bad"');
+		const grid = el('serverGrid');
+		expect(grid.innerHTML).toContain('failed: ECONNREFUSED');
+		expect(grid.innerHTML).toContain('bind failed');
+		expect(grid.innerHTML).toContain('class="bad"');
 	});
 
 	it('reports engine errors to the extension, throttled', () => {
@@ -187,19 +207,40 @@ describe('player.js', () => {
 		expect(streamErrors[0][0]).toEqual({ type: 'streamError', message: 'Failed to fetch' });
 	});
 
-	it('requests status and restart from the debug panel buttons', () => {
+	it('shows the error card only when the index is missing entirely', () => {
+		mockEngine.getDiagnostics.mockReturnValue(baseDiagnostics({ manifestChunkCount: undefined }));
+		mockEngine.dispatchEngineEvent('error', { message: 'index unreachable' });
+
+		expect(el('player').dataset.state).toBe('error');
+		expect(el('errorMessage').textContent).toBe('index unreachable');
+
+		// A chunk failing mid-track is recoverable: log it, keep playing.
+		mockEngine.getDiagnostics.mockReturnValue(baseDiagnostics());
+		el('player').dataset.state = 'ready';
+		mockEngine.dispatchEngineEvent('error', { message: 'chunk 4 failed' });
+		expect(el('player').dataset.state).toBe('ready');
+		expect(el('eventLog').innerHTML).toContain('chunk 4 failed');
+	});
+
+	it('requests status and restart from the inspector buttons', () => {
 		mockVscode.postMessage.mockClear();
-		(document.getElementById('serverRefresh') as HTMLButtonElement).click();
-		(document.getElementById('serverRestart') as HTMLButtonElement).click();
+		el('serverRefresh').click();
+		el('serverRestart').click();
 
 		expect(mockVscode.postMessage).toHaveBeenCalledWith({ type: 'requestServerStatus' });
 		expect(mockVscode.postMessage).toHaveBeenCalledWith({ type: 'restartServer' });
 	});
 
-	it('persists debug panel open state via vscode API', () => {
-		const panel = document.getElementById('debugPanel') as HTMLDetailsElement;
-		panel.open = false;
-		panel.dispatchEvent(new Event('toggle'));
-		expect(mockVscode.setState).toHaveBeenCalledWith({ debugOpen: false });
+	it('persists inspector open state via the vscode API', () => {
+		el('inspectorToggle').click();
+		expect(mockVscode.setState).toHaveBeenCalledWith(
+			expect.objectContaining({ inspectorOpen: true }),
+		);
+		expect(el('inspector').hidden).toBe(false);
+
+		el('inspectorToggle').click();
+		expect(mockVscode.setState).toHaveBeenCalledWith(
+			expect.objectContaining({ inspectorOpen: false }),
+		);
 	});
 });

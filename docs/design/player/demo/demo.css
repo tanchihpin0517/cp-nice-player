@@ -1,0 +1,117 @@
+/*
+ * DEMO ONLY — not shipped.
+ * Deliberately neutral so it never blends with the themed player below it.
+ */
+
+.demo-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  background: #14161c;
+  border-bottom: 1px solid #2a2e39;
+  color: #d7dbe4;
+  font: 12px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.demo-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #ffffff;
+  margin-right: 4px;
+}
+
+.demo-brand-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c5cff, #2ad4c9);
+}
+
+.demo-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.demo-field > span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #7d8496;
+}
+
+.demo-field b {
+  color: #d7dbe4;
+  font-weight: 600;
+}
+
+.demo-bar select,
+.demo-btn {
+  background: #1e222c;
+  color: #d7dbe4;
+  border: 1px solid #2f3542;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.demo-bar select:hover,
+.demo-btn:hover {
+  border-color: #454d5e;
+}
+
+.demo-btn {
+  align-self: flex-end;
+  padding: 6px 12px;
+}
+
+.demo-bar input[type='range'] {
+  width: 140px;
+  accent-color: #7c5cff;
+}
+
+.demo-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-left: 14px;
+  border-left: 1px solid #2a2e39;
+}
+
+.demo-toggles label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #a7aebd;
+  cursor: pointer;
+}
+
+.demo-toggles input {
+  accent-color: #7c5cff;
+  margin: 0;
+}
+
+/* Width presets drive the container query in player.css. */
+#cpRoot {
+  max-width: 1100px;
+  margin: 0 auto;
+  transition: max-width 160ms ease;
+}
+
+#cpRoot[data-width='820'] { max-width: 820px; }
+#cpRoot[data-width='380'] { max-width: 380px; }
+
+#cpRoot[data-width='380'],
+#cpRoot[data-width='820'] {
+  border-left: 1px dashed color-mix(in srgb, var(--cp-fg) 18%, transparent);
+  border-right: 1px dashed color-mix(in srgb, var(--cp-fg) 18%, transparent);
+}

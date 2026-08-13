@@ -104,6 +104,11 @@ export class MockWorkletScheduler {
 		this.totalFramesWritten += frameCount;
 		return frameCount;
 	}
+
+	async writeChannels(_channels: Float32Array[], frameCount: number) {
+		this.totalFramesWritten += frameCount;
+		return frameCount;
+	}
 }
 
 export async function setupEngineGlobals(): Promise<new () => EventTarget> {

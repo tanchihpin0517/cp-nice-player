@@ -708,6 +708,15 @@ class StreamingAudioEngine extends EventTarget {
       }
 
       const planar = audioBufferToPlanar(audioBuffer);
+
+      // Measured before any crossfade work, and over the chunk's own span rather
+      // than the decoded buffer: the tail past endSec belongs to the next chunk
+      // and would otherwise be counted twice in the waveform overview.
+      const chunkFrames = entry
+        ? Math.round((entry.endSec - entry.startSec) * this.manifest.sampleRate)
+        : frames;
+      const chunkPeaks = computeChunkPeaks(planar, Math.min(frames, chunkFrames));
+
       const fade = overlapFrames > 0 ? buildLinearFade(overlapFrames) : null;
       let wsolaShiftSamples = null;
 
@@ -769,6 +778,7 @@ class StreamingAudioEngine extends EventTarget {
         chunkIndex: index,
         elapsedMs,
         wsolaShiftSamples,
+        peaks: chunkPeaks,
       });
       this._checkPlaybackEnded();
 

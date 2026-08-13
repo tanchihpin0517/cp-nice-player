@@ -132,7 +132,8 @@
     "test": "npm-run-all test:media test:extension",
     "test:extension": "vscode-test",
     "test:media": "vitest run",
-    "test:media:watch": "vitest"
+    "test:media:watch": "vitest",
+    "demo": "node docs/design/player/serve.mjs"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

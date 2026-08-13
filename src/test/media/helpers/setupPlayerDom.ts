@@ -14,26 +14,94 @@ export interface MockEngine {
 	dispatchEngineEvent: (type: string, detail?: Record<string, unknown>) => void;
 }
 
+/**
+ * Mirrors the shipping markup in media/player/player.html. Only the ids and the
+ * structure playerView.js reaches for are reproduced; styling is irrelevant here.
+ */
 export function setupPlayerDom(): void {
 	document.body.innerHTML = `
-    <div class="track-name" id="trackName">No media loaded</div>
-    <div class="track-state" id="trackState">Waiting</div>
-    <div class="empty" id="emptyState"></div>
-    <button id="playbackPlayPause" disabled>Play</button>
-    <span id="playbackCurrentTime">0:00</span>
-    <span id="playbackDuration">0:00</span>
-    <input id="playbackSeek" type="range" min="0" max="1" step="0.001" value="0" disabled>
-    <input id="playbackVolume" type="range" min="0" max="1" step="0.01" value="1" disabled>
-    <input id="playbackMuted" type="checkbox" disabled>
-    <dl class="debug-grid" id="serverGrid"></dl>
-    <button id="serverRefresh" type="button">Refresh status</button>
-    <button id="serverRestart" type="button">Restart server</button>
-    <dl class="debug-grid" id="debugGrid"></dl>
-    <ol class="debug-log" id="debugLog"></ol>
-    <details class="debug-panel" id="debugPanel" open>
-      <summary>Debug</summary>
-    </details>
+    <div class="cp-root">
+      <main class="cp-player" id="player" data-state="empty" data-playing="false" data-muted="false">
+        <h1 id="trackName">No media loaded</h1>
+        <span id="chipFormat"></span>
+        <span id="chipLayout"></span>
+        <span id="chipChunks"></span>
+        <span class="cp-status" id="trackStatus" data-tone="idle">
+          <span id="trackStatusText">Waiting for a file</span>
+        </span>
+        <button id="inspectorToggle" type="button" aria-expanded="false"></button>
+
+        <div class="cp-wave" id="wave" role="slider" tabindex="0">
+          <canvas id="waveCanvas"></canvas>
+          <div id="waveSkeleton"></div>
+          <div id="waveHover"><span id="waveHoverTime">0:00</span></div>
+        </div>
+        <span id="currentTime">0:00</span>
+        <span id="durationTime">0:00</span>
+
+        <button id="skipBack" type="button"></button>
+        <button id="playPause" type="button" aria-label="Play"></button>
+        <button id="skipForward" type="button"></button>
+        <button id="muteBtn" type="button" aria-label="Mute"></button>
+        <input type="range" id="volume" min="0" max="1" step="0.01" value="1">
+
+        <div id="errorState"><div id="errorMessage"></div>
+          <button id="errorRetry" type="button"></button>
+          <button id="errorDiagnostics" type="button"></button>
+        </div>
+        <div id="emptyState"></div>
+
+        <section id="inspector" hidden>
+          <button id="serverRefresh" type="button">Refresh</button>
+          <button id="serverRestart" type="button">Restart</button>
+          <dl id="serverGrid"></dl>
+          <dl id="playbackGrid"></dl>
+          <ol id="eventLog"></ol>
+        </section>
+      </main>
+    </div>
   `;
+}
+
+/** jsdom has no canvas or ResizeObserver; the waveform only needs them to exist. */
+export function stubCanvasEnvironment(): void {
+	(globalThis as Record<string, unknown>).ResizeObserver = class {
+		observe() { /* no layout in jsdom */ }
+		disconnect() { /* no layout in jsdom */ }
+	};
+
+	const noop = () => undefined;
+	const context = new Proxy({}, { get: () => noop, set: () => true });
+	HTMLCanvasElement.prototype.getContext = (() => context) as unknown as
+		HTMLCanvasElement['getContext'];
+	HTMLCanvasElement.prototype.getBoundingClientRect = () => ({
+		width: 800, height: 132, left: 0, top: 0, right: 800, bottom: 132, x: 0, y: 0,
+		toJSON: () => ({}),
+	});
+	Element.prototype.setPointerCapture = noop;
+	Element.prototype.releasePointerCapture = noop;
+}
+
+export function baseDiagnostics(overrides: Record<string, unknown> = {}) {
+	return {
+		paused: true,
+		manifestChannels: 2,
+		manifestSampleRate: 44100,
+		contextSampleRate: 44100,
+		maxEncodedChunks: 64,
+		encodedChunkCount: 2,
+		contextState: 'running',
+		manifestChunkCount: 5,
+		currentChunkIndex: 1,
+		ringFramesAvailable: 1000,
+		ringFreeFrames: 500,
+		underrunFrames: 0,
+		decodedChunks: '0',
+		fetchInFlight: '—',
+		currentTime: 30,
+		duration: 120,
+		...overrides,
+	};
 }
 
 export function createMockEngine(): MockEngine {
@@ -48,25 +116,7 @@ export function createMockEngine(): MockEngine {
 		setMuted: vi.fn(),
 		getDuration: vi.fn(() => 120),
 		getCurrentTime: vi.fn(() => 30),
-		getDiagnostics: vi.fn(() => ({
-			paused: true,
-			manifestChannels: 2,
-			manifestSampleRate: 44100,
-			contextSampleRate: 44100,
-			maxEncodedChunks: 64,
-			encodedChunkCount: 2,
-			bufferedChunks: '0-1',
-			contextState: 'running',
-			manifestChunkCount: 5,
-			currentChunkIndex: 1,
-			ringFramesAvailable: 1000,
-			ringFreeFrames: 500,
-			underrunFrames: 0,
-			decodedChunks: '0',
-			fetchInFlight: '—',
-			currentTime: 30,
-			duration: 120,
-		})),
+		getDiagnostics: vi.fn(() => baseDiagnostics()),
 		addEventListener(type: string, listener: (event: Event) => void) {
 			if (!listeners.has(type)) {
 				listeners.set(type, new Set());

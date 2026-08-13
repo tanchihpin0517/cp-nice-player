@@ -294,6 +294,12 @@ export class WebviewPlayerSession implements PlayerSession {
 		const formatUtilsUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.extensionUri, 'media', 'player', 'formatUtils.js'),
 		);
+		const waveformUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'media', 'player', 'waveform.js'),
+		);
+		const playerViewUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'media', 'player', 'playerView.js'),
+		);
 
 		this.panel.webview.html = template
 			.replaceAll('{{cspSource}}', webview.cspSource)
@@ -306,6 +312,8 @@ export class WebviewPlayerSession implements PlayerSession {
 			.replaceAll('{{workletProcessorUri}}', workletProcessorUri.toString())
 			.replaceAll('{{engineScriptUri}}', engineScriptUri.toString())
 			.replaceAll('{{formatUtilsUri}}', formatUtilsUri.toString())
+			.replaceAll('{{waveformUri}}', waveformUri.toString())
+			.replaceAll('{{playerViewUri}}', playerViewUri.toString())
 			.replaceAll('{{scriptUri}}', scriptUri.toString());
 	}
 }
