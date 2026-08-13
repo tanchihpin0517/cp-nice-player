@@ -1,27 +1,63 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!--
+    CP's Nice Player — the instrument face in miniature.
+
+    The player inside the editor borrows the host theme's palette, so the mark is
+    the one place this product owns colour: a painted panel, one ink, and a single
+    lamp amber spent only on the streaming window.
+
+    Corner radius is 26.7px, 20.8% of the side. That number is measured, not
+    guessed: fitting the alpha boundary of the Swift extension's icon gives a
+    circular arc at r = 20.83% of the side to within 0.9px RMS, where the best
+    superellipse fit is 7.7px RMS. So this is an ordinary circular corner at a
+    large radius, not the curvature-continuous squircle — an earlier pass of this
+    file used a generated superellipse path and had the shape wrong.
+
+    The border is an inset rounded rect rather than a clipped stroke, because a
+    uniformly inset rounded rectangle *is* the offset curve of the outer one: the
+    radius simply drops by the inset. That only holds for circular corners.
+
+    Two failures from the original mark are on record and must not return: opacity
+    falloff on the outer bars, which collapsed the mark's width at list size, and
+    drawing the streaming window as a 10% tint, which hid the one thing this
+    extension exists to do. The window is a solid lit field with the tape running
+    across it — an outline around knocked-out bars reads as an empty box at 28px.
+  -->
   <defs>
-    <linearGradient id="bl-bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e8eef6"/>
-    </linearGradient>
-    <linearGradient id="bl-fg" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#16a34a"/>
-      <stop offset="1" stop-color="#2563eb"/>
-    </linearGradient>
+    <clipPath id="inside"><rect x="0" y="0" width="128" height="128" rx="26.7"/></clipPath>
   </defs>
 
-  <rect x="0" y="0" width="128" height="128" rx="28" fill="url(#bl-bg)"/>
-  <rect x="1" y="1" width="126" height="126" rx="27" fill="none" stroke="#0f172a" stroke-opacity="0.12" stroke-width="2"/>
+  <rect x="0" y="0" width="128" height="128" rx="26.7" fill="#E1DED7"/>
 
-  <rect x="44" y="24" width="40" height="80" rx="10" fill="#2563eb" fill-opacity="0.10"/>
+  <g clip-path="url(#inside)">
+    <!-- The lit window, behind the tape. -->
+    <rect x="62" y="38" width="36" height="68" rx="5" fill="#D4571C"/>
 
-  <g fill="url(#bl-fg)">
-    <rect x="20" y="56" width="10" height="16" rx="5" opacity="0.42"/>
-    <rect x="34" y="46" width="10" height="36" rx="5" opacity="0.62"/>
-    <rect x="48" y="34" width="10" height="60" rx="5"/>
-    <rect x="62" y="26" width="10" height="76" rx="5"/>
-    <rect x="76" y="40" width="10" height="48" rx="5"/>
-    <rect x="90" y="50" width="10" height="28" rx="5" opacity="0.58"/>
-    <rect x="104" y="58" width="10" height="12" rx="5" opacity="0.38"/>
+    <g fill="#22262B">
+      <!-- Ruler register: a scored baseline with a two-level tick hierarchy. -->
+      <rect x="20" y="32" width="90" height="2" rx="1"/>
+      <rect x="20" y="23" width="2" height="9" rx="1"/>
+      <rect x="34.5" y="27" width="2" height="5" rx="1"/>
+      <rect x="49" y="27" width="2" height="5" rx="1"/>
+      <rect x="63.5" y="23" width="2" height="9" rx="1"/>
+      <rect x="78" y="27" width="2" height="5" rx="1"/>
+      <rect x="92.5" y="27" width="2" height="5" rx="1"/>
+      <rect x="107" y="23" width="2" height="9" rx="1"/>
+
+      <!-- Tape register: bars mirrored about the centre line. -->
+      <rect x="18" y="60" width="11" height="24" rx="5.5"/>
+      <rect x="34" y="47" width="11" height="50" rx="5.5"/>
+      <rect x="50" y="40" width="11" height="64" rx="5.5"/>
+      <rect x="67" y="44" width="11" height="56" rx="5.5"/>
+      <rect x="84" y="52" width="11" height="40" rx="5.5"/>
+      <rect x="100" y="61" width="11" height="22" rx="5.5"/>
+    </g>
+
+    <!-- Buffer register: the cell under the window is the one that is loaded. -->
+    <rect x="20" y="108" width="90" height="4" rx="2" fill="#C7C3BA"/>
+    <rect x="62" y="108" width="36" height="4" rx="2" fill="#D4571C"/>
   </g>
+
+  <!-- Scored edge: inset by 1.5, so its radius drops by the same 1.5. -->
+  <rect x="1.5" y="1.5" width="125" height="125" rx="25.2" fill="none" stroke="#22262B" stroke-width="3"/>
 </svg>

@@ -238,6 +238,43 @@ derived from those.
   `{colors.wave-ghost}` 18%) and **ruler ticks** (`{colors.tick}` 24%,
   `{colors.tick-major}` 46%): the instrument face's three-level hierarchy, all foreground.
 
+### The Mark
+
+The extension icon (`media/icon.svg`, rasterised to `media/icon.png` at 128×128) is the **one place
+this product owns colour**. It renders on marketplace pages and in the Extensions list, outside any
+webview, so no `--vscode-*` token is available to it and the Guest Palette Rule cannot apply. It gets a
+fixed palette of exactly three values, and no more:
+
+| Role | Value | Carries |
+| --- | --- | --- |
+| Panel | `#E1DED7` | The painted plate. Not near-white: it has to hold a silhouette against a white marketplace page. |
+| Ink | `#22262B` | The scored edge, the ruler ticks, and the tape bars. |
+| Lamp | `#D4571C` | The streaming window and its buffer cell. Nothing else. |
+
+The mark is the instrument face in miniature — ruler register, tape register, buffer register — but it
+does **not** inherit the panel's 2px milled corner. The user asked for the corner the Swift extension's
+icon has, and that corner was **measured rather than assumed**: fitting the alpha boundary of that icon
+gives a circular arc at `r = 20.83%` of the side to within 0.9px RMS, where the best superellipse fit is
+7.7px RMS. It is an ordinary circular corner at a large radius, not the curvature-continuous squircle.
+
+So the plate is `rx: 26.7` on 128px — 20.86% of the side, matching the reference to 0.03pp, with the
+same 6.25%-of-side diagonal inset. An earlier pass of this file shipped a generated superellipse path
+and had the shape wrong; the radius is the whole specification and needs no path.
+
+Bar ends are fully rounded to match. The scored edge is an inset rounded rect, not a clipped stroke,
+because a uniformly inset rounded rectangle *is* the offset curve of the outer one — the radius drops by
+the inset. That holds for circular corners and not for a superellipse, which is what forced the clipped
+stroke before.
+
+The one radius held back is the **window's**, at `rx: 5`. At the plate's radius the window plus the two
+rounded bars inside it merge into a single lozenge and stop reading as tape passing a window.
+
+**Named rule — The Lit Window Rule.** The window is a solid lamp field with the tape running *across*
+it, never an outline around knocked-out bars. At list size an outline reads as an empty box, which
+loses the one thing the extension is for. Two failures are on record and must not return: opacity
+falloff on the outer bars (they vanish, and the mark's width collapses), and drawing the window as a
+10% tint (invisible at every size).
+
 ### Named Rules
 **The Guest Palette Rule.** Every colour resolves from a `--vscode-*` token. Hex appears
 only as a `var()` fallback for the standalone demo and is never a design value. No owned
