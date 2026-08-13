@@ -8,6 +8,8 @@ Instead of transcoding an entire file before play starts, CP's Nice Player scans
 
 - **Chunked streaming** — Audio starts after the first segment is ready, not after a full-file transcode.
 - **Responsive seeking** — Scrub to any position; only the chunks you need are fetched and decoded.
+- **Waveform overview** — Ruler, waveform, and buffer state on one canvas, so what is loaded and what is playing are visible at a glance.
+- **Loop locators** — Mark an in and out point to re-hear a passage, by dragging the ruler or with `[`, `]`, `\`, and `Shift+L`.
 - **Seamless chunk joins** — WSOLA-aligned linear crossfade blends overlap tails at chunk boundaries (configurable via `playback.crossfadeMs`).
 - **Bounded memory** — The webview keeps a configurable window of decoded PCM, not the whole track.
 - **Broad format support** — MP3, WAV, OGG, Opus, FLAC, M4A, AAC, WebM, MP4, and MKV containers open in the custom editor (audio tracks only).
@@ -86,48 +88,3 @@ When you open a track:
 
 FFmpeg on `PATH` is required for integration tests in the extension suite; suites skip automatically when FFmpeg is missing.
 
-## Release notes
-
-### 0.3.0
-
-The debug panel reports playback server status over `postMessage`, so it still arrives when the webview cannot reach the server, and adds **Refresh status** and **Restart server** buttons. New `GET /health` endpoint plus a host-side loopback probe distinguishes a dead server from one that is merely unreachable from the webview. Ships an extension icon.
-
-### 0.2.1
-
-WSOLA alignment at chunk joins now searches ±overlapFrames (signed shift support). Encode-format fallback (mp3/wav) and streaming architecture docs updated.
-
-### 0.2.0
-
-In-memory streaming only — no disk cache under `globalStorage/stream/`. Pin-aware LRU for encoded chunks in the webview. FFmpeg encoder fallback to mp3/wav when ogg/flac encoders are unavailable. Full backend and frontend test suites (`npm test`).
-
-### 0.1.7
-
-Accurate playhead from consumed PCM frames (with WSOLA drop compensation), so the UI stays in sync during buffering and at chunk joins. Worklet ring stats at 20 Hz, decode limited to one chunk ahead, and seek UI held steady while dragging. Debug panel adds frame-consumption and WSOLA diagnostics.
-
-### 0.1.6
-
-Leaner webview debug UI and event log (fetch/decode completion only, with size and timing). Default crossfade is `20` ms. When `playback.debugLogging` is on, the extension logs effective settings at startup and one FFmpeg transcode template per server start.
-
-### 0.1.5
-
-Chunk-boundary crossfade: configurable `playback.crossfadeMs`, backend frame-aligned overlap tails, and frontend WSOLA-aligned linear blending. Playback now uses an AudioWorklet PCM scheduler. `npm test` runs headless (no Electron). WebCodecs decode path removed; chunks decode via `decodeAudioData` only.
-
-### 0.1.4
-
-Lowers the minimum VS Code version to `1.90.0` and adds automated publishing to Open VSX, the Visual Studio Marketplace, and GitHub Releases.
-
-### 0.1.3
-
-Security hardening: `ffmpegPath` restricted to machine scope, XSS fixes in the debug panel, and strict CORS on the playback server.
-
-### 0.1.2
-
-Fixes playback in remote and containerized setups by resolving the server URL through `vscode.env.asExternalUri`, which triggers VS Code port forwarding. Stream request URLs are built with the `URL` API for safe path joining.
-
-### 0.1.0
-
-Streaming engine overhaul: independent fetch and decode loops, suspend/resume pause without discarding scheduled audio, configurable fetch concurrency, and more reliable seek/buffer behavior.
-
-### 0.0.1
-
-Initial release with chunked streaming playback: frame-indexed segments, on-demand FFmpeg transcode, and Web Audio scheduling in the editor webview.

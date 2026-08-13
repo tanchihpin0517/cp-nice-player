@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-13
+
+### Added
+
+- **Waveform overview** — the ruler, waveform, and chunk registers draw on a single canvas from per-chunk peaks reported at decode. The buffered extent is rasterised per screen pixel, and regions not yet read draw as a constant ghost band rather than as nothing at all.
+- **Loop locators** for re-hearing a passage: drag the ruler to mark in/out, or use `[`, `]`, `\`, and `Shift+L`. The wrap is implemented as a seek in `playerView.js`, so the engine keeps no loop state.
+- Keyboard transport in the player: space / `k` play-pause, `j` / `l` and arrow keys seek, `Home` / `End` jump, `m` mute.
+- Elapsed time read to the millisecond, via `formatClock` in `media/player/formatUtils.js`.
+- Mock-engine demo harness under `docs/design/player` (`npm run demo`) for developing the player UI outside VS Code.
+- `DESIGN.md` and `PRODUCT.md` record the player's design system and product intent.
+
+### Changed
+
+- **Webview player UI rebuilt** as a single machined plate — scored row divisions, square lamp keys, and the elapsed counter in a milled aperture — replacing the previous card stack.
+- Failure paths repaint the status band in place, keeping the transport visible instead of replacing the player with an error card.
+- Every tone in the player derives from the host theme's own `--vscode-*` foreground tokens; the accent is reserved for the playhead and the chunk register, so the waveform's coloured extent is not misread as the buffered extent.
+- The player DOM lives in `media/player/playerView.js`; `player.js` is now only the host message channel. The debug panel is folded into a collapsible inspector.
+- Extension icon redesigned around the player's instrument face. The mark renders outside any webview, where no `--vscode-*` token exists, so it carries a fixed three-value palette — the one place this extension owns colour.
+- `@vscode/test-electron` bumped to v3, and `compile-tests` clears `out/` before compiling.
+- `.impeccable/`, `scratch/`, and the `docs/design/` demo are excluded from the packaged extension; all three are local-only.
+
 ## [0.3.0] - 2026-08-09
 
 ### Added
@@ -170,6 +191,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio only — video tracks in container files are not played.
 - Chunk cache is session-scoped and cleared when the playback server stops or restarts.
 
+[0.4.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.4.0
 [0.3.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.3.0
 [0.2.1]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.2.1
 [0.2.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.2.0
