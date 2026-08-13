@@ -138,7 +138,7 @@
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
+    "@types/node": "24.x",
     "@types/vscode": "^1.90.0",
     "@vitest/coverage-v8": "^4.1.9",
     "@vscode/test-cli": "^0.0.12",
