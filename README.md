@@ -39,9 +39,13 @@ To use a different editor for a file type, use **Reopen Editor With…** or set 
 ### Requirements
 
 - **VS Code 1.90.0 or newer** (or a compatible editor such as VSCodium on Open VSX).
-- **FFmpeg** must be installed and available on your `PATH`, or set `cp-nice-player.ffmpegPath` in **user** settings to the executable on the machine where playback runs. FFmpeg is used to probe the source and transcode playback chunks on the host.
+- **FFmpeg**, on the machine where playback runs — which under Remote SSH, Dev Containers, WSL, or Codespaces is the remote host, not your local one. FFmpeg probes the source and transcodes playback chunks.
 
-If FFmpeg is missing, the extension shows a one-time notification with setup guidance.
+The extension looks for FFmpeg in this order: `cp-nice-player.ffmpegPath` (if set, it is the only candidate), then `ffmpeg` on `PATH`, then a build it downloaded itself.
+
+**On Linux**, if neither of the first two turns anything up, the extension offers to download a pinned FFmpeg build into its own storage — useful on remote hosts and containers where there is no FFmpeg and no root to install one. The download is checksum-verified, and you can trigger it any time with **CP's Nice Player: Download FFmpeg (Linux)**. See [FFmpeg on the playback host](docs/ffmpeg.md).
+
+**On macOS and Windows**, install FFmpeg yourself — `brew install ffmpeg-full` or `winget install ffmpeg` — and set `cp-nice-player.ffmpegPath` in **user** settings if it is not on `PATH`. On macOS, prefer `ffmpeg-full` over `ffmpeg`: Homebrew's slim formula ships without libvorbis, so the default `ogg` playback format falls back to mp3.
 
 ## How it works
 
@@ -59,7 +63,7 @@ When you open a track:
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `cp-nice-player.ffmpegPath` | *(empty)* | Path to the `ffmpeg` executable on the playback machine. Machine-scoped (user settings only). Leave empty to use `ffmpeg` from `PATH`. |
+| `cp-nice-player.ffmpegPath` | *(empty)* | Path to the `ffmpeg` executable on the playback machine. Machine-scoped (user settings only). Leave empty to use `ffmpeg` from `PATH`, or a build the extension downloaded — see [FFmpeg on the playback host](docs/ffmpeg.md). |
 | `cp-nice-player.playback.format` | `ogg` | Preferred output format for streamed chunks: `ogg` (smaller, faster) or `flac` (lossless). If the preferred FFmpeg encoder is unavailable, the extension falls back to **mp3** (when `ogg` is set) or **wav** (when `flac` is set). See [Encode format resolution](docs/stream.md#encode-format-resolution). |
 | `cp-nice-player.playback.oggQuality` | `6` | libvorbis quality (`0`–`10`) when effective format is `ogg`. Also maps to libmp3lame quality when fallback is `mp3`. Higher is better quality and larger chunks. |
 | `cp-nice-player.playback.chunkDurationSec` | `2` | Target duration of each streamed chunk in seconds (`0.5`–`10`). |
@@ -86,5 +90,11 @@ When you open a track:
 | `npm run test:media` | Vitest + jsdom — engine modules, `StreamingAudioEngine`, `WorkletScheduler`, player UI |
 | `npm run test:extension` | Mocha + `@vscode/test-cli` — playback backend and `playerPanel` bridge |
 
-FFmpeg on `PATH` is required for integration tests in the extension suite; suites skip automatically when FFmpeg is missing.
+FFmpeg on `PATH` is required for integration tests in the extension suite; suites skip automatically when FFmpeg is missing. The managed-download suite reaches GitHub for a few KB and skips when offline.
+
+CI runs `npm test` on Linux and macOS for every push to `main` and every pull request. Both matter: the managed-install suites only have a pinned build to resolve on Linux and skip elsewhere.
+
+### Bumping the pinned FFmpeg build
+
+`node scripts/pin-ffmpeg.mjs` regenerates `src/ffmpegDownload/pins.ts` from a BtbN release, verifying each archive against the release's own checksum manifest. See [FFmpeg on the playback host](docs/ffmpeg.md#bumping-the-pinned-build).
 

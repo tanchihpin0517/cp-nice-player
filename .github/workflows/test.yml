@@ -1,0 +1,63 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# A newer push to the same branch makes an in-flight run pointless.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Use Node.js 24.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      # Integration suites skip themselves without FFmpeg, so install it rather
+      # than let most of the extension suite quietly do nothing.
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg xvfb
+
+      # ffmpeg-full rather than ffmpeg: the slim formula ships without libvorbis,
+      # which silently skips every ogg test — and ogg is the default format.
+      # It is keg-only, so it has to be linked explicitly; adding its bin to
+      # GITHUB_PATH would not help, because VS Code on macOS re-resolves PATH
+      # from a login shell before the extension host starts.
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ffmpeg-full
+          brew link --overwrite --force ffmpeg-full
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `npm test` runs pretest first: type check, lint, and both builds.
+      # The extension host needs a display on Linux.
+      - name: Run tests (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm test
+
+      - name: Run tests (macOS)
+        if: runner.os == 'macOS'
+        run: npm test
