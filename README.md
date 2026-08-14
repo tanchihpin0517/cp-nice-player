@@ -45,7 +45,7 @@ The extension looks for FFmpeg in this order: `cp-nice-player.ffmpegPath` (if se
 
 **On Linux**, if neither of the first two turns anything up, the extension offers to download a pinned FFmpeg build into its own storage — useful on remote hosts and containers where there is no FFmpeg and no root to install one. The download is checksum-verified, and you can trigger it any time with **CP's Nice Player: Download FFmpeg (Linux)**. See [FFmpeg on the playback host](docs/ffmpeg.md).
 
-**On macOS and Windows**, install FFmpeg yourself — `brew install ffmpeg` or `winget install ffmpeg` — and set `cp-nice-player.ffmpegPath` in **user** settings if it is not on `PATH`.
+**On macOS and Windows**, install FFmpeg yourself — `brew install ffmpeg-full` or `winget install ffmpeg` — and set `cp-nice-player.ffmpegPath` in **user** settings if it is not on `PATH`. On macOS, prefer `ffmpeg-full` over `ffmpeg`: Homebrew's slim formula ships without libvorbis, so the default `ogg` playback format falls back to mp3.
 
 ## How it works
 
