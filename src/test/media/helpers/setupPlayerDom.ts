@@ -124,6 +124,7 @@ export function baseDiagnostics(overrides: Record<string, unknown> = {}) {
 		underrunFrames: 0,
 		decodedChunks: '0',
 		fetchInFlight: '—',
+		bufferedChunks: '0-1',
 		currentTime: 30,
 		duration: 120,
 		...overrides,

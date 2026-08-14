@@ -9,7 +9,7 @@
  *   2. TAPE   — mirrored peak bars between two guide rails, coloured past /
  *               future by the playhead, ghosted where nothing has been decoded.
  *   3. CHUNKS — the buffer as a pixel-resolution data field: one column per
- *               screen pixel, decoded / fetching / unread.
+ *               screen pixel, decoded / fetched / unread.
  *
  * The ruler and the tape answer different questions, which is why both exist:
  * the tape says what has been heard this session and accumulates, the chunk
@@ -42,14 +42,10 @@ class WaveformView {
     this.hoverTime = null;
     this.locators = { in: null, out: null };
     this.loopActive = false;
-    this.buffer = { chunkCount: 0, chunkDurationSec: 1, decoded: [], inflight: [] };
+    this.buffer = { chunkCount: 0, chunkDurationSec: 1, decoded: [], fetched: [] };
     this.cssWidth = 0;
     this.cssHeight = 0;
     this.colors = {};
-    this.animating = false;
-    this._phase = 0;
-    this._frame = null;
-    this._loopBound = () => this._loop();
 
     this.refreshTheme();
     this._observer = new ResizeObserver(() => this.resize());
@@ -59,9 +55,6 @@ class WaveformView {
 
   dispose() {
     this._observer.disconnect();
-    if (this._frame != null) {
-      cancelAnimationFrame(this._frame);
-    }
   }
 
   refreshTheme() {
@@ -74,7 +67,7 @@ class WaveformView {
       playhead: read('--cp-wave-playhead', '#cccccc'),
       railEmpty: read('--cp-rail-empty', 'rgba(204,204,204,0.09)'),
       railDecoded: read('--cp-rail-decoded', 'rgba(77,170,252,0.62)'),
-      railInflight: read('--cp-rail-inflight', '#cca700'),
+      railFetched: read('--cp-rail-fetched', '#cca700'),
       tick: read('--cp-tick', 'rgba(204,204,204,0.24)'),
       tickMajor: read('--cp-tick-major', 'rgba(204,204,204,0.46)'),
       label: read('--cp-wave-label', 'rgba(204,204,204,0.7)'),
@@ -133,29 +126,7 @@ class WaveformView {
 
   setBuffer(buffer) {
     this.buffer = { ...this.buffer, ...buffer };
-    // Fetching chunks blink, so keep a frame loop alive only while they exist.
-    this.setAnimating(this.buffer.inflight.length > 0);
     this.render();
-  }
-
-  setAnimating(on) {
-    const wanted = on && !this._reducedMotion();
-    if (wanted === this.animating) {
-      return;
-    }
-    this.animating = wanted;
-    if (wanted) {
-      this._frame = requestAnimationFrame(this._loopBound);
-    } else if (this._frame != null) {
-      cancelAnimationFrame(this._frame);
-      this._frame = null;
-    }
-  }
-
-  _reducedMotion() {
-    return typeof window !== 'undefined'
-      && typeof window.matchMedia === 'function'
-      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
 
   /** The time axis spans the full canvas, so a click lands where it looks. */
@@ -187,14 +158,6 @@ class WaveformView {
       return 'chunks';
     }
     return 'tape';
-  }
-
-  _loop() {
-    this._phase += 0.045;
-    this.render();
-    if (this.animating) {
-      this._frame = requestAnimationFrame(this._loopBound);
-    }
   }
 
   render() {
@@ -372,7 +335,7 @@ class WaveformView {
    */
   _drawChunkField(w, y, height) {
     const { ctx } = this;
-    const { chunkCount, decoded, inflight } = this.buffer;
+    const { chunkCount, decoded, fetched } = this.buffer;
 
     ctx.fillStyle = this.colors.score;
     ctx.fillRect(0, y - 1, w, 1);
@@ -395,22 +358,20 @@ class WaveformView {
         }
       }
     };
-    paint(decoded, 1);
-    // Fetching wins the pixel: it is the state the listener is waiting on.
-    paint(inflight, 2);
-
-    // Blink is the tape machine's working lamp, and the only motion here.
-    const blink = this.animating ? 0.6 + 0.4 * Math.sin(this._phase * 4) : 1;
+    // The field reads as a pipeline running left to right through each chunk:
+    // unread, then fetched, then decoded. Decoded wins the shared pixel because
+    // it is the further-along state — a chunk still counts as fetched once its
+    // bytes are decoded, and painting that over the top would undo the reading.
+    paint(fetched, 1);
+    paint(decoded, 2);
 
     let runStart = 0;
     for (let i = 1; i <= cols; i += 1) {
       if (i === cols || state[i] !== state[runStart]) {
         const value = state[runStart];
         if (value) {
-          ctx.globalAlpha = value === 2 ? blink : 1;
-          ctx.fillStyle = value === 2 ? this.colors.railInflight : this.colors.railDecoded;
+          ctx.fillStyle = value === 2 ? this.colors.railDecoded : this.colors.railFetched;
           ctx.fillRect(runStart, y, i - runStart, height);
-          ctx.globalAlpha = 1;
         }
         runStart = i;
       }

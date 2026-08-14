@@ -498,7 +498,7 @@ system is recorded in [DESIGN.md](../DESIGN.md) and its strategy in
 | --- | --- | --- |
 | Ruler | 26px | three-level engraved tick hierarchy, time numerals, the loop bar, locator feet, the playhead index |
 | Tape | flexible | mirrored peak bars at a 2px pitch between two guide rails; past is full-strength foreground, future is faint foreground, unread is a constant low band |
-| Chunks | 10px | the buffer rasterised **per screen pixel** — decoded / fetching / unread |
+| Chunks | 10px | the buffer rasterised **per screen pixel** — decoded / fetched / unread |
 
 The accent is spent in exactly two places, the playhead and the chunk register, so the
 tape's coloured extent can never be misread as the buffered extent.

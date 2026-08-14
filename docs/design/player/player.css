@@ -111,7 +111,7 @@
   --cp-wave-playhead: var(--cp-accent);
   --cp-rail-empty: color-mix(in srgb, var(--cp-fg) 15%, transparent);
   --cp-rail-decoded: var(--cp-accent);
-  --cp-rail-inflight: var(--cp-warn);
+  --cp-rail-fetched: var(--cp-warn);
   --cp-tick: color-mix(in srgb, var(--cp-fg) 24%, transparent);
   --cp-tick-major: color-mix(in srgb, var(--cp-fg) 46%, transparent);
   --cp-wave-label: var(--cp-muted);
@@ -474,7 +474,7 @@ body {
 }
 
 .cp-swatch[data-kind='decoded'] { background: var(--cp-rail-decoded); }
-.cp-swatch[data-kind='inflight'] { background: var(--cp-rail-inflight); }
+.cp-swatch[data-kind='fetched'] { background: var(--cp-rail-fetched); }
 .cp-swatch[data-kind='empty'] { background: var(--cp-rail-empty); outline: 1px solid var(--cp-score); outline-offset: -1px; }
 
 .cp-locators {

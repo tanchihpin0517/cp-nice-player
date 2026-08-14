@@ -111,9 +111,10 @@ mistakable for a measurement.
 `UNDERRUN +0`. A ring depth without its capacity, or an underrun count without its
 sign, is a number nobody can act on.
 
-**Motion only reports the stream.** Fetching chunks blink in the chunk register, the
-status lamp pulses while the player is busy, and a scan bar runs while the index is being
-read. Nothing else moves, and all of it stops under `prefers-reduced-motion`. In
+**Motion only reports the stream.** The status lamp pulses while the player is busy, and
+a scan bar runs while the index is being read. Nothing else moves, and all of it stops
+under `prefers-reduced-motion`. The chunk register is deliberately still: it reports what
+is held in memory, which is a state to read rather than an event to catch. In
 particular **the counter does not animate**: an earlier version clicked the seconds
 register over per changed digit, which was removed at the user's request — reading a time
 is not a state change worth staging, and a register that moves while you are trying to
@@ -175,6 +176,14 @@ normal waveform colour — so the two are told apart by both colour and height.
 Peaks are kept for the whole session even after their audio is evicted from the
 chunk cache: they are 64 bytes per chunk, so a track heard once stays drawn.
 
-`getDiagnostics()` reports `decodedChunks` / `fetchInFlight` as preformatted
-strings (`"0-3, 7"`); `parseChunkRanges()` parses them back, so the engine needed
-no change for the chunk register.
+`getDiagnostics()` reports `bufferedChunks` (encoded bytes resident in the LRU) and
+`decodedChunks` / `fetchInFlight` as preformatted range strings (`"0-3, 7"`), which
+`parseChunkRanges()` turns back into pairs. The chunk register keys off
+`bufferedChunks` and `decodedChunks` — `fetchInFlight` is a single chunk at a time
+and belongs in the diagnostics bay, not on the canvas.
+
+`parseChunkRanges()` also accepts an array, and tells a list of ranges from a bare
+list of chunk indices by looking at its first entry. Feeding it indices where it
+expected ranges once destructured a number inside the draw loop, and because the
+register is drawn at the top of the sync pass it took the counter, the data line and
+the diagnostics panel down with it while audio kept playing.

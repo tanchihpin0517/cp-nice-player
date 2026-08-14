@@ -218,6 +218,26 @@ describe('player.js', () => {
 		expect(grid.innerHTML).toContain('/music/track.mp3');
 	});
 
+	/**
+	 * The chunk register is drawn at the top of the sync pass, so a buffer report
+	 * it cannot read throws before the counter, the data line and this panel are
+	 * ever written — the whole readout freezes on its last good frame while audio
+	 * carries on playing. Both range shapes the engine has ever reported have to
+	 * survive the trip.
+	 */
+	it('keeps the diagnostics panel live across buffer report shapes', async () => {
+		await loadTrack();
+		mockEngine.dispatchEngineEvent('ready', { duration: 120 });
+
+		for (const bufferedChunks of ['0-3, 7', [0, 1, 2, 5], [[0, 3]], '—', undefined]) {
+			mockEngine.getDiagnostics.mockReturnValue(
+				baseDiagnostics({ bufferedChunks, currentTime: 42 }),
+			);
+			mockEngine.dispatchEngineEvent('timeupdate', { currentTime: 42, duration: 120 });
+			expect(el('playbackGrid').innerHTML).toContain('42.000s');
+		}
+	});
+
 	it('logs fetch and decode events', () => {
 		mockEngine.dispatchEngineEvent('chunkfinished', { chunkIndex: 2, bytes: 2048 });
 		mockEngine.dispatchEngineEvent('decodefinished', {

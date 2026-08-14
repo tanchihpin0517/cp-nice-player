@@ -89,7 +89,7 @@ describe('WaveformView', () => {
 					'--cp-wave-playhead': 'HEAD',
 					'--cp-rail-empty': 'RAIL_EMPTY',
 					'--cp-rail-decoded': 'RAIL_DECODED',
-					'--cp-rail-inflight': 'RAIL_INFLIGHT',
+					'--cp-rail-fetched': 'RAIL_FETCHED',
 					'--cp-mark': 'MARK',
 				};
 				return colors[name] ?? '';
@@ -106,7 +106,7 @@ describe('WaveformView', () => {
 		const { canvas, bars } = recordingCanvas();
 		const view = new WaveformView(canvas);
 		view.setDuration(100);
-		view.setBuffer({ chunkCount: 0, decoded: [], inflight: [] });
+		view.setBuffer({ chunkCount: 0, decoded: [], fetched: [] });
 		view.setPeaks(peaks);
 
 		// Every setter repaints, so keep only the last frame — and only the tape
@@ -164,6 +164,44 @@ describe('WaveformView', () => {
 		expect(bars.every((bar) => bar.fill === 'GHOST')).toBe(true);
 	});
 
+	/**
+	 * The chunk register reads as a pipeline — unread, then fetched, then decoded
+	 * — so a chunk whose bytes are held *and* decoded has to draw decoded. The
+	 * fetched band is wider than the decoded one in normal operation, and painting
+	 * it last would bury the decoded extent under it.
+	 */
+	it('draws decoded over fetched in the chunk register', () => {
+		const { canvas, bars } = recordingCanvas();
+		const view = new WaveformView(canvas);
+		view.setDuration(100);
+		bars.length = 0;
+		view.setBuffer({ chunkCount: 10, fetched: [[0, 5]], decoded: [[0, 2]] });
+
+		const decoded = bars.filter((bar) => bar.fill === 'RAIL_DECODED');
+		const fetched = bars.filter((bar) => bar.fill === 'RAIL_FETCHED');
+
+		// One run each: chunks 0-2 decoded, and 3-5 fetched but not yet decoded.
+		expect(decoded).toHaveLength(1);
+		expect(fetched).toHaveLength(1);
+		expect(decoded[0].x).toBe(0);
+		// 400px / 10 chunks = 40px each, so the fetched-only run starts at chunk 3.
+		expect(fetched[0].x).toBe(120);
+	});
+
+	it('leaves the chunk register empty until the manifest reports a chunk count', () => {
+		const { canvas, bars } = recordingCanvas();
+		const view = new WaveformView(canvas);
+		view.setDuration(100);
+		bars.length = 0;
+		view.setBuffer({ chunkCount: 0, fetched: [[0, 5]], decoded: [[0, 2]] });
+
+		// Only the empty rail: with no chunk count there is no axis to place a
+		// range on, so a stale buffer report cannot draw a band across the field.
+		expect(bars.some((bar) => bar.fill === 'RAIL_DECODED')).toBe(false);
+		expect(bars.some((bar) => bar.fill === 'RAIL_FETCHED')).toBe(false);
+		expect(bars.some((bar) => bar.fill === 'RAIL_EMPTY')).toBe(true);
+	});
+
 	it('maps a pointer position to a time in the track', () => {
 		const { canvas } = recordingCanvas();
 		const view = new WaveformView(canvas);
@@ -186,7 +224,7 @@ describe('WaveformView', () => {
 		const { canvas, bars } = recordingCanvas();
 		const view = new WaveformView(canvas);
 		view.setDuration(100);
-		view.setBuffer({ chunkCount: 0, decoded: [], inflight: [] });
+		view.setBuffer({ chunkCount: 0, decoded: [], fetched: [] });
 		bars.length = 0;
 		view.setLocators({ in: 20, out: 40 });
 

@@ -43,7 +43,6 @@ class StreamingAudioEngine extends EventTarget {
     this._decodeIdleTimer = null;
     this._timeTicker = null;
     this._indexRetryTimer = null;
-    this._bufferedChunks = '—';
     this._lastWorkletStats = null;
     this._crossfadeTail = null;
   }
@@ -202,6 +201,9 @@ class StreamingAudioEngine extends EventTarget {
 
   getDiagnostics() {
     const fetchInFlight = [...this.fetchInFlight.keys()].sort((a, b) => a - b);
+    // The LRU hands back its keys in recency order, so this has to be sorted to
+    // read as a span of the track rather than a history of what was touched.
+    const buffered = [...this.encodedChunks.keys()].sort((a, b) => a - b);
     const currentChunk = this.manifest ? chunkIndexForTime(this.manifest, this.getCurrentTime()) : 0;
     return {
       contextState: this.manifest ? this.ctx.state : 'uninitialized',
@@ -232,7 +234,7 @@ class StreamingAudioEngine extends EventTarget {
       manifestChunkCount: this.manifest?.chunking?.count,
       manifestCrossfadeMs: this.manifest?.chunking?.crossfadeMs,
       crossfadeTailHeld: this._crossfadeTail != null,
-      bufferedChunks: this._bufferedChunks,
+      bufferedChunks: formatChunkRanges(buffered),
     };
   }
 
@@ -249,7 +251,6 @@ class StreamingAudioEngine extends EventTarget {
     this.scheduler = null;
     this.manifest = null;
     this.encodedChunks.clear();
-    this._bufferedChunks = '—';
     this.fetchInFlight.clear();
     this.decodedChunks.clear();
     this._clearCrossfadeTail();
@@ -507,7 +508,6 @@ class StreamingAudioEngine extends EventTarget {
       return;
     }
     if (this.fetchInFlight.size > 0) {
-      this._updateBufferingState();
       return;
     }
     const generation = this.loadGeneration;
@@ -524,7 +524,6 @@ class StreamingAudioEngine extends EventTarget {
       break;
     }
     this._evictEncodedChunks();
-    this._updateBufferingState();
   }
 
   _nextChunkToSchedule() {
@@ -619,11 +618,6 @@ class StreamingAudioEngine extends EventTarget {
     }
   }
 
-  _updateBufferingState() {
-    const buffered = [...this.encodedChunks.keys()];
-    this._bufferedChunks = formatChunkRanges(buffered);
-  }
-
   async _fetchChunk(index, generation) {
     if (this.encodedChunks.has(index)) {
       return this.encodedChunks.get(index);
@@ -655,7 +649,6 @@ class StreamingAudioEngine extends EventTarget {
         }
 
         this._storeEncodedChunk(index, bytes);
-        this._updateBufferingState();
         this._emit('chunkfinished', {
           chunkIndex: index,
           bytes: bytes.byteLength,

@@ -164,6 +164,21 @@ describe('StreamingAudioEngine', () => {
 		}
 	});
 
+	/**
+	 * The chunk register draws this, so it has to read as a span of the track. The
+	 * LRU hands its keys back in recency order, which is the order chunks were
+	 * touched, not the order they sit in the file.
+	 */
+	it('reports the encoded cache as a sorted chunk span', async () => {
+		await engine.load(serverUrl, 'abcd1234', { maxEncodedChunks: 10 });
+
+		for (const index of [3, 0, 1, 2, 5]) {
+			engine._storeEncodedChunk(index, new ArrayBuffer(16));
+		}
+
+		expect(engine.getDiagnostics().bufferedChunks).toBe('0-3, 5');
+	});
+
 	it('maintains fetch window for current playhead chunk', async () => {
 		await engine.load(serverUrl, 'abcd1234', { chunkBufferCount: 3 });
 

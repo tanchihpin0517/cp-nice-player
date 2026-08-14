@@ -213,7 +213,7 @@ derived from those.
 ### Secondary
 - **Signal Green / Signal Amber / Signal Red** (`{colors.ok}` / `{colors.warn}` /
   `{colors.bad}`): raw theme hues, reserved for non-text marks where the 3:1 floor
-  applies — the state lamp, the in-flight rail on the chunk register, the error hue the
+  applies — the state lamp, the fetched rail on the chunk register, the error hue the
   status band is scored in.
 - **Signal Text tones** (`{colors.ok-text}` / `{colors.warn-text}` / `{colors.bad-text}`):
   the same hues pulled toward the theme foreground for anything that is read as text
@@ -509,8 +509,9 @@ fully rounded end, does not belong to this world.
 - **Focus:** a 2px `focusBorder` ring at 2px offset on every button, input and the well.
   The locator model is keyboard-first and the plate is quiet enough to carry it.
 - **Motion:** state transitions are 120ms ease on background, border and colour; the hover
-  flag is 90ms. Motion is reserved for reporting the stream: fetching chunks blink in the
-  chunk register, the busy lamp pulses, and the scan bar runs while the index is read.
+  flag is 90ms. Motion is reserved for reporting the stream: the busy lamp pulses and the
+  scan bar runs while the index is read. The chunk register itself does not animate — it
+  reports what is held in memory, which is a state and not an event.
   Nothing that carries a *reading* animates — the counter in particular is still. All of it
   is neutralised under `prefers-reduced-motion: reduce`.
 

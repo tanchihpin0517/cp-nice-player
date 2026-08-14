@@ -387,6 +387,7 @@ class MockEngine extends EventTarget {
       currentChunkIndex: Math.floor(this.currentTime / this.chunkDurationSec),
       fetchInFlight: formatChunkRanges(inflight),
       decodedChunks: formatChunkRanges(decoded),
+      bufferedChunks: formatChunkRanges([...this.encoded].sort((a, b) => a - b)),
       ringFramesAvailable: this.manifest ? this.framesAvailable : null,
       ringFreeFrames: this.manifest ? 16384 - this.framesAvailable : null,
       underrunFrames: this.underrunFrames,

@@ -19,10 +19,35 @@ const UNMEASURED = -1;
 /** A ruler drag shorter than this is a click, and a click clears the locators. */
 const MIN_REGION_SECONDS = 0.08;
 
-/** "0-3, 7" -> [[0,3],[7,7]]. Today's engine reports ranges as a string. */
+/** [0,1,2,5] -> [[0,2],[5,5]]. Sorts first: a chunk cache is keyed by recency. */
+function coalesceIndices(indices) {
+  const sorted = [...indices].sort((a, b) => a - b);
+  const ranges = [];
+  for (const index of sorted) {
+    const last = ranges[ranges.length - 1];
+    if (last && index === last[1] + 1) {
+      last[1] = index;
+    } else {
+      ranges.push([index, index]);
+    }
+  }
+  return ranges;
+}
+
+/**
+ * "0-3, 7" -> [[0,3],[7,7]]. Today's engine reports ranges as a string.
+ *
+ * An array is taken as ranges when its first entry is one, and as a bare list of
+ * chunk indices otherwise. The two are easy to confuse at the call site, and the
+ * cost of getting it wrong is a destructure of a number inside the draw loop,
+ * which takes the whole sync pass — counter, data line and diagnostics — down
+ * with it.
+ */
 function parseChunkRanges(value) {
   if (Array.isArray(value)) {
-    return value;
+    return Array.isArray(value[0]) || value.length === 0
+      ? value
+      : coalesceIndices(value);
   }
   if (typeof value !== 'string' || value === '' || value === '—' || value === 'none') {
     return [];
@@ -208,7 +233,7 @@ class PlayerView {
     this.setControlsEnabled(false);
     this._resetPeaks(0);
     this.waveform.setProgress(0);
-    this.waveform.setBuffer({ chunkCount: 0, decoded: [], inflight: [] });
+    this.waveform.setBuffer({ chunkCount: 0, decoded: [], fetched: [] });
 
     try {
       await this.engine.load(message.serverUrl, message.audioId, {
@@ -696,7 +721,7 @@ class PlayerView {
     this.waveform.setBuffer({
       chunkCount: diag.manifestChunkCount ?? 0,
       decoded: parseChunkRanges(diag.decodedChunkList ?? diag.decodedChunks),
-      inflight: parseChunkRanges(diag.fetchInFlightList ?? diag.fetchInFlight),
+      fetched: parseChunkRanges(diag.bufferedChunks),
     });
 
     // A machine with no stream on it reports no lengths: a total next to a
