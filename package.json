@@ -90,7 +90,7 @@
         },
         "cp-nice-player.playback.prefetchSec": {
           "type": "number",
-          "default": 30,
+          "default": 10,
           "minimum": 0,
           "description": "How far ahead of the playhead the player fetches chunks, in seconds of audio, counting the current chunk. The chunk count is derived from playback.chunkDurationSec."
         },

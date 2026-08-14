@@ -40,7 +40,7 @@ function chunkCountForSeconds(seconds: number): number {
 export function getPrefetchSec(): number {
 	const value = vscode.workspace
 		.getConfiguration('cp-nice-player')
-		.get<number>('playback.prefetchSec', 30);
+		.get<number>('playback.prefetchSec', 10);
 	return Math.max(0, value);
 }
 

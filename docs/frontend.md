@@ -428,7 +428,7 @@ AudioWorklet does not remove encode-splice discontinuities unless PCM is blended
 
 ### Buffer policy
 
-`**prefetchSec`** (VS Code setting, default **30**) — how far ahead of the playhead the loader fetches, in seconds of audio. It is a *fetch target*, not a buffer size: nothing is sized by it. The two things that actually hold data are the PCM ring (`RING_MIN_CHUNKS × chunkDurationSec`, above) and the encoded LRU (`cachedChunksSec`). The host converts it to a chunk count before handing it to the engine, which works in chunks throughout:
+`**prefetchSec`** (VS Code setting, default **10**) — how far ahead of the playhead the loader fetches, in seconds of audio. It is a *fetch target*, not a buffer size: nothing is sized by it. The two things that actually hold data are the PCM ring (`RING_MIN_CHUNKS × chunkDurationSec`, above) and the encoded LRU (`cachedChunksSec`). The host converts it to a chunk count before handing it to the engine, which works in chunks throughout:
 
 ```
 C = ceil(prefetchSec / chunkDurationSec)      → prefetchChunks, at least 1
@@ -436,7 +436,7 @@ playhead = P
 → hold / fetch chunks: P, P+1, …, P + C − 1      (C chunks, including the current one)
 ```
 
-Example: at the 2 s chunk default, `prefetchSec = 30` → `C = 15`; playing chunk **10** → chunks **10, 11, … 24** (15 chunks, not 14). Raising `chunkDurationSec` shrinks the count but holds the ~30 s window. ChunkLoader tops up the window as playback advances.
+Example: at the 2 s chunk default, `prefetchSec = 10` → `C = 5`; playing chunk **10** → chunks **10, 11, 12, 13, 14** (5 chunks, not 4). Raising `chunkDurationSec` shrinks the count but holds the ~10 s window. ChunkLoader tops up the window as playback advances.
 
 **Encoded chunk LRU** (`cachedChunksSec`, default **300** — 5 minutes, likewise `ceil`-converted to a chunk count):
 

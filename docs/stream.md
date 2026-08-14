@@ -548,9 +548,9 @@ Encode tail by effective format:
 "cp-nice-player.playback.chunkDurationSec": { "default": 2, "minimum": 0.5, "maximum": 10 }
 "cp-nice-player.playback.crossfadeMs": { "default": 20, "minimum": 0, "maximum": 500 }
 "cp-nice-player.playback.prefetchSec": {
-  "default": 30,
+  "default": 10,
   "minimum": 0,
-  "description": "Seconds of audio to buffer ahead of the playhead, including the current chunk. The chunk count is derived from playback.chunkDurationSec."
+  "description": "How far ahead of the playhead the player fetches chunks, in seconds of audio, counting the current chunk. The chunk count is derived from playback.chunkDurationSec."
 }
 "cp-nice-player.playback.cachedIndexes": { "default": 100, "minimum": 1 }
 "cp-nice-player.playback.cachedChunksSec": {
@@ -561,7 +561,7 @@ Encode tail by effective format:
 "cp-nice-player.playback.debugLogging": { "default": false }
 ```
 
-`**prefetchSec**` — how far ahead of the playhead the loader fetches, in seconds of audio, **counting the current chunk**. Default **30**. It is a fetch target rather than a buffer size; retention is governed by `cachedChunksSec`. The host converts it to a chunk count with `ceil(prefetchSec / chunkDurationSec)`, floored at 1, and sends that count to the webview; at the ~2 s chunk default it yields 15 chunks, so playing chunk 10 holds 10–24. `**cachedChunksSec**` is converted the same way (default **300** ≈ 150 chunks at 2 s), but sizes the webview's encoded-chunk LRU rather than the fetch window — it is a retention ceiling spanning both sides of the playhead, not a read-ahead target.
+`**prefetchSec**` — how far ahead of the playhead the loader fetches, in seconds of audio, **counting the current chunk**. Default **10**. It is a fetch target rather than a buffer size; retention is governed by `cachedChunksSec`. The host converts it to a chunk count with `ceil(prefetchSec / chunkDurationSec)`, floored at 1, and sends that count to the webview; at the ~2 s chunk default it yields 5 chunks, so playing chunk 10 fetches 10–14. `**cachedChunksSec**` is converted the same way (default **300** ≈ 150 chunks at 2 s), but sizes the webview's encoded-chunk LRU rather than the fetch window — it is a retention ceiling spanning both sides of the playhead, not a read-ahead target.
 
 Keep existing `playback.format` (preference: `ogg` | `flac`; see [Encode format resolution](#encode-format-resolution)) and `playback.oggQuality` (also drives mp3 quality when fallback is `mp3`).
 
@@ -667,7 +667,7 @@ Production playback uses Option B: `WorkletScheduler.writePcm()` keeps the ring 
 
 ### Buffer policy (summary)
 
-- **Forward:** `prefetchSec` of audio from the playhead (default 30 s ≈ 15 chunks at 2 s/chunk).
+- **Forward:** `prefetchSec` of audio from the playhead (default 10 s ≈ 5 chunks at 2 s/chunk).
 - **Behind:** ~2 chunks retained for quick rewind.
 - **Seek:** cancel fetches, reset buffer/scheduler, refill from seek chunk.
 - **Join:** configurable crossfade between adjacent chunks (default `20` ms via `playback.crossfadeMs`; WSOLA-aligned linear blend in the webview).
@@ -728,7 +728,7 @@ Single pass — ship only when legacy paths are gone.
 ### Planning (this doc)
 
 - Goals, API, index memoization — this file; buffer policy and schedulers — [frontend.md](frontend.md)
-- Chunk strategy: **frame-aligned ~2 s chunks inferred from scanned frame times**; `prefetchSec`: **30** (≈ 15 chunks)
+- Chunk strategy: **frame-aligned ~2 s chunks inferred from scanned frame times**; `prefetchSec`: **10** (≈ 5 chunks)
 - Stream-only: **no legacy code paths**
 - Ogg vs FLAC default for streaming
 
@@ -768,7 +768,7 @@ Single pass — ship only when legacy paths are gone.
 | API shape             | `**/index` + `/chunk/{n}` + `?audioId=`**              | Clean URLs; backend owns path lookup and in-memory index                   |
 | Audio identity        | `**audioId` registry**                                 | Extension registers path; webview only sees opaque id                      |
 | Index memoization     | **Bounded LRU (session-scoped)**                        | Frame scan paid once per source per server run; cleared on start/dispose     |
-| Prefetch window       | `**prefetchSec`** (default 30 s → 15 chunks)        | Counts current chunk; playing 10 → fetch 10–24                             |
+| Prefetch window       | `**prefetchSec`** (default 10 s → 5 chunks)         | Counts current chunk; playing 10 → fetch 10–14                             |
 | Playback              | **Stream only (full refactor)**                        | Delete legacy modules; no dual paths                                       |
 | Chunk encoding        | **Effective format** (ogg/mp3/flac/wav)                | User preference + encoder probe; webview decodes with `decodeAudioData`     |
 | Self-contained chunks | **Yes (v1)**                                           | Avoid init-segment complexity in webview                                   |

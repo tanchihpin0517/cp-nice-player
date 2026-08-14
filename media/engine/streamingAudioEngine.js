@@ -8,9 +8,9 @@ const RING_HEADROOM_SEC = 5;
 const RING_MIN_CHUNKS = 2;
 const BEHIND_CHUNK_COUNT = 2;
 // Fallbacks for when the host omits the option; they mirror the shipped settings
-// (prefetchSec 30 and cachedChunksSec 300) at the default 2 s chunk duration.
+// (prefetchSec 10 and cachedChunksSec 300) at the default 2 s chunk duration.
 const DEFAULT_MAX_CACHED_CHUNKS = 150;
-const DEFAULT_PREFETCH_CHUNKS = 15;
+const DEFAULT_PREFETCH_CHUNKS = 5;
 const DEFAULT_CHUNK_DURATION_SEC = 2;
 const WORKLET_MODULE_URL = document.querySelector('meta[name="cp-worklet-module-url"]')?.getAttribute('content') ?? '';
 
