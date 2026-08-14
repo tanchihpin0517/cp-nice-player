@@ -56,8 +56,16 @@ function runFfmpeg(
 			if (code === 0) {
 				resolve({ stdout, stderr });
 			} else {
-				const detail = stderr.trim() || `ffmpeg exited with code ${code}`;
-				reject(new Error(detail));
+				// Always keep the exit code: stderr alone hides which invocation
+				// failed, and an empty stderr used to leave only a bare code.
+				const detail = stderr.trim();
+				reject(
+					new Error(
+						detail
+							? `ffmpeg exited with code ${code}: ${detail}`
+							: `ffmpeg exited with code ${code} and wrote nothing to stderr`,
+					),
+				);
 			}
 		});
 	});
@@ -100,11 +108,13 @@ export function buildFfmpegChunkArgs(
 	options: TranscodeChunkOptions,
 ): string[] {
 	const { startSec, endSec, format, oggQuality } = options;
+	// `error`, not `quiet`: stderr is only ever read when the transcode fails, and
+	// suppressing it turned every failure into an unexplained exit code.
 	const baseArgs = [
 		'-y',
 		'-nostats',
 		'-loglevel',
-		'quiet',
+		'error',
 		'-accurate_seek',
 		'-ss',
 		String(startSec),

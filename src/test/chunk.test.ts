@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import * as path from 'path';
+import { checkFfmpegAvailable } from '../ffmpegHost';
 import { ChunkOutOfRangeError, getOrCreateChunk } from '../playback/stream/chunk';
 import { clearStreamIndexCache, getOrCreateIndex } from '../playback/stream/indexBuilder';
 import { computeStreamKey } from '../playback/stream/streamKey';
@@ -40,7 +41,11 @@ suite('Chunk delivery', () => {
 	async function buildContext() {
 		const key = await computeStreamKey(inputPath);
 		const streamCtx = { fsPath: inputPath, key };
-		const ffmpeg = { available: true, path: ffmpegPath };
+		// Resolve for real rather than hand-rolling an FfmpegCheckResult. The
+		// transcode picks its encoder from the host's cached capabilities, so a
+		// fabricated result left that choice to whatever earlier suites happened
+		// to leave behind — and asked for an encoder this build may not have.
+		const ffmpeg = await checkFfmpegAvailable(true);
 		const manifest = await getOrCreateIndex(streamCtx, ffmpeg);
 		return { streamCtx, ffmpeg, manifest };
 	}

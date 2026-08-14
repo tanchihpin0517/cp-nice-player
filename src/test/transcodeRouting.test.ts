@@ -70,7 +70,7 @@ suite('Transcode routing', () => {
 			'-y',
 			'-nostats',
 			'-loglevel',
-			'quiet',
+			'error',
 			'-accurate_seek',
 			'-ss',
 			'0',

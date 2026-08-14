@@ -510,7 +510,7 @@ Target: index ready quickly after open; frame scan cost is paid once per source 
 Base args (all formats):
 
 ```bash
-ffmpeg -nostats -loglevel quiet \
+ffmpeg -nostats -loglevel error \
   -accurate_seek -ss {startSec} -to {encodeEndSec} -i {input} \
   -vn … pipe:1
 ```
