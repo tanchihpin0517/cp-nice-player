@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-14
+
 ### Added
 
 - **Managed FFmpeg download on Linux.** When no FFmpeg is found, the missing-FFmpeg notification now offers to fetch one, and **CP's Nice Player: Download FFmpeg (Linux)** does the same on demand. This targets the case the extension actually hits — Remote SSH hosts, dev containers, and Codespaces with no FFmpeg and no root to install one. macOS and Windows keep the manual requirement: those users have a package manager and admin rights.
@@ -17,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - FFmpeg resolution now falls back to a managed install: `cp-nice-player.ffmpegPath` (still the sole candidate when set), then `ffmpeg` on `PATH`, then the downloaded build. A cancelled or failed download re-arms the one-time missing-FFmpeg prompt so the offer does not vanish for good.
+- Transcode failures now say why. The chunk transcode ran at `-loglevel quiet`, so any failure surfaced as a bare `ffmpeg exited with code N`; it now runs at `-loglevel error` and the error carries FFmpeg's stderr alongside the exit code. Stderr is only ever read when the transcode fails, so the success path is unchanged.
+- macOS install guidance points at `ffmpeg-full` instead of `ffmpeg`. Homebrew's slim formula ships without libvorbis, which silently downgraded the default `ogg` playback format to mp3.
 
 ## [0.5.0] - 2026-08-14
 
@@ -210,6 +214,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audio only — video tracks in container files are not played.
 - Chunk cache is session-scoped and cleared when the playback server stops or restarts.
 
+[0.6.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.6.0
+[0.5.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.5.0
 [0.4.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.4.0
 [0.3.0]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.3.0
 [0.2.1]: https://github.com/tanchihpin0517/cp-nice-player/releases/tag/v0.2.1
