@@ -114,7 +114,7 @@ export function baseDiagnostics(overrides: Record<string, unknown> = {}) {
 		manifestChannels: 2,
 		manifestSampleRate: 44100,
 		contextSampleRate: 44100,
-		maxEncodedChunks: 64,
+		maxCachedChunks: 64,
 		encodedChunkCount: 2,
 		contextState: 'running',
 		manifestChunkCount: 5,
@@ -183,8 +183,8 @@ export const loadMediaMessage = {
 	debug: {
 		fsPath: '/music/track.mp3',
 		playbackFormat: 'ogg',
-		chunkBufferCount: 5,
+		prefetchChunks: 5,
 		chunkDurationSec: 1,
-		maxEncodedChunks: 64,
+		maxCachedChunks: 64,
 	},
 };

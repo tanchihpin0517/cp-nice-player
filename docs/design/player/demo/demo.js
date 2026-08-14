@@ -126,8 +126,8 @@ function loadSelectedTrack() {
       fsPath: track.fsPath,
       playbackFormat: track.playbackFormat,
       chunkDurationSec: 1,
-      chunkBufferCount: 5,
-      maxEncodedChunks: 64,
+      prefetchChunks: 5,
+      maxCachedChunks: 64,
     },
   });
 }

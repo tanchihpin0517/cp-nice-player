@@ -384,8 +384,8 @@ The webview does **not** initiate open-media or registration. It only sends `{ t
     playbackFormat: 'ogg' | 'mp3' | 'flac' | 'wav',  // effective encode format (see Encode format resolution)
     playbackOggQuality: number,
     chunkDurationSec: number,
-    chunkBufferCount: number,
-    maxEncodedChunks: number,
+    prefetchChunks: number,
+    maxCachedChunks: number,
   },
 }
 ```
@@ -488,7 +488,7 @@ ${fsPath}\0${mtimeMs}\0${size}\0${format}\0${oggQuality}\0${chunkDurationSec}\0$
 
 Changing source file, encode settings, effective format, or chunk duration → new key → new index entry.
 
-**Index LRU:** default capacity 64 entries (`playback.maxIndexEntries`). On `PlaybackServer.start()` and `dispose()`, `clearStreamIndexCache()` empties the map. Frame scan cost is paid once per source per server session (until evicted).
+**Index LRU:** default capacity 100 cached indexes (`playback.cachedIndexes`), minimum 1 and no upper bound — an index is metadata only, ~152 bytes per chunk entry (≈4.5 KB per minute of audio at 2 s chunks). On `PlaybackServer.start()` and `dispose()`, `clearStreamIndexCache()` empties the map. Frame scan cost is paid once per source per server session (until evicted).
 
 **Chunk generation:** each `/chunk/{n}` request spawns FFmpeg with output `pipe:1`, collects stdout into a `Buffer`, and returns it. No chunk files are written or read. `chunkInFlight` dedupes concurrent requests for the same chunk; `runSerialTranscode` serializes FFmpeg work.
 
@@ -546,15 +546,22 @@ Encode tail by effective format:
 
 ```json
 "cp-nice-player.playback.chunkDurationSec": { "default": 2, "minimum": 0.5, "maximum": 10 }
-"cp-nice-player.playback.chunkBufferCount": {
-  "default": 15,
-  "description": "Number of chunks to buffer from the playhead, including the current chunk. Example: count 15 at chunk 10 → chunks 10–24."
-}
 "cp-nice-player.playback.crossfadeMs": { "default": 20, "minimum": 0, "maximum": 500 }
+"cp-nice-player.playback.prefetchSec": {
+  "default": 30,
+  "minimum": 0,
+  "description": "Seconds of audio to buffer ahead of the playhead, including the current chunk. The chunk count is derived from playback.chunkDurationSec."
+}
+"cp-nice-player.playback.cachedIndexes": { "default": 100, "minimum": 1 }
+"cp-nice-player.playback.cachedChunksSec": {
+  "default": 300,
+  "minimum": 0,
+  "description": "Seconds of already-fetched audio the player keeps cached, so seeking back into it does not re-fetch. Spans both sides of the playhead. The chunk count is derived from playback.chunkDurationSec."
+}
 "cp-nice-player.playback.debugLogging": { "default": false }
 ```
 
-`**chunkBufferCount**` — chunk count in the forward buffer, **including the current chunk**. Default **15** with frame-aligned ~2 s chunks (time window is approximately 30 s from the playhead).
+`**prefetchSec**` — how far ahead of the playhead the loader fetches, in seconds of audio, **counting the current chunk**. Default **30**. It is a fetch target rather than a buffer size; retention is governed by `cachedChunksSec`. The host converts it to a chunk count with `ceil(prefetchSec / chunkDurationSec)`, floored at 1, and sends that count to the webview; at the ~2 s chunk default it yields 15 chunks, so playing chunk 10 holds 10–24. `**cachedChunksSec**` is converted the same way (default **300** ≈ 150 chunks at 2 s), but sizes the webview's encoded-chunk LRU rather than the fetch window — it is a retention ceiling spanning both sides of the playhead, not a read-ahead target.
 
 Keep existing `playback.format` (preference: `ogg` | `flac`; see [Encode format resolution](#encode-format-resolution)) and `playback.oggQuality` (also drives mp3 quality when fallback is `mp3`).
 
@@ -643,7 +650,7 @@ loadMedia(serverUrl, audioId)
 | Component | Role |
 | --- | --- |
 | **IndexClient** | Fetch manifest; chunk map with `startSec` / `endSec` |
-| **ChunkLoader** | Buffer `[playhead … playhead + chunkBufferCount − 1]`; abort on seek |
+| **ChunkLoader** | Fetch `[playhead … playhead + prefetchChunks − 1]`; abort on seek |
 | **ChunkDecoder** | `decodeAudioData` → `AudioBuffer` per chunk |
 | **Scheduler** | PCM → continuous output (see below) |
 
@@ -660,7 +667,7 @@ Production playback uses Option B: `WorkletScheduler.writePcm()` keeps the ring 
 
 ### Buffer policy (summary)
 
-- **Forward:** `chunkBufferCount` chunks from playhead (default 15 ≈ 30 s at 2 s/chunk).
+- **Forward:** `prefetchSec` of audio from the playhead (default 30 s ≈ 15 chunks at 2 s/chunk).
 - **Behind:** ~2 chunks retained for quick rewind.
 - **Seek:** cancel fetches, reset buffer/scheduler, refill from seek chunk.
 - **Join:** configurable crossfade between adjacent chunks (default `20` ms via `playback.crossfadeMs`; WSOLA-aligned linear blend in the webview).
@@ -721,7 +728,7 @@ Single pass — ship only when legacy paths are gone.
 ### Planning (this doc)
 
 - Goals, API, index memoization — this file; buffer policy and schedulers — [frontend.md](frontend.md)
-- Chunk strategy: **frame-aligned ~2 s chunks inferred from scanned frame times**; `chunkBufferCount`: **15**
+- Chunk strategy: **frame-aligned ~2 s chunks inferred from scanned frame times**; `prefetchSec`: **30** (≈ 15 chunks)
 - Stream-only: **no legacy code paths**
 - Ogg vs FLAC default for streaming
 
@@ -745,7 +752,7 @@ Single pass — ship only when legacy paths are gone.
 
 ### Polish
 
-- Host background prefetch within `chunkBufferCount` window (optional)
+- Host background prefetch within `prefetchChunks` window (optional)
 - Chunk crossfade (5 ms) in worklet or main thread
 - Update `package.json` description and README
 
@@ -761,7 +768,7 @@ Single pass — ship only when legacy paths are gone.
 | API shape             | `**/index` + `/chunk/{n}` + `?audioId=`**              | Clean URLs; backend owns path lookup and in-memory index                   |
 | Audio identity        | `**audioId` registry**                                 | Extension registers path; webview only sees opaque id                      |
 | Index memoization     | **Bounded LRU (session-scoped)**                        | Frame scan paid once per source per server run; cleared on start/dispose     |
-| Playback buffer       | `**chunkBufferCount`** (default 15)                    | Includes current chunk; playing 10 → hold 10–24                            |
+| Prefetch window       | `**prefetchSec`** (default 30 s → 15 chunks)        | Counts current chunk; playing 10 → fetch 10–24                             |
 | Playback              | **Stream only (full refactor)**                        | Delete legacy modules; no dual paths                                       |
 | Chunk encoding        | **Effective format** (ogg/mp3/flac/wav)                | User preference + encoder probe; webview decodes with `decodeAudioData`     |
 | Self-contained chunks | **Yes (v1)**                                           | Avoid init-segment complexity in webview                                   |
@@ -809,7 +816,7 @@ Single pass — ship only when legacy paths are gone.
 - **No legacy playback code** — `rg` finds no `preparePlayback`, `ensureTranscodedAudio`, `GET /audio`, `transcodeForPlayback`, or whole-file `AudioEngine.load`
 - Index without full-file transcode; playable within **~1–3 s** of tab open (probe + first chunk + decode)
 - Seek fetches **O(1)** chunks, not whole file
-- Webview memory **bounded** by `chunkBufferCount` window
+- Webview memory **bounded** by the encoded LRU (`cachedChunksSec`) and the PCM ring, not by the prefetch window
 - Same server run: reopened file hits index LRU via same stream key (no re-scan until eviction)
 - Server start/stop: in-memory index LRU cleared; no files written under `globalStorage/stream/`
 

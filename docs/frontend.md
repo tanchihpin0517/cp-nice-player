@@ -22,7 +22,7 @@ Stream-only playback — replaces monolithic `load()` + single `AudioBuffer` wit
 | Component        | Responsibility                                                                                                                   |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | **IndexClient**  | `fetch(\`${serverUrl}/index?audioId=${id})` → manifest with frame-aligned chunk map                                              |
-| **ChunkLoader**  | Fetches chunks in `[playhead, playhead + chunkBufferCount − 1]`; priority queue; abort on seek                                   |
+| **ChunkLoader**  | Fetches chunks in `[playhead, playhead + prefetchChunks − 1]`; priority queue; abort on seek                                   |
 | **ChunkDecoder** | Per chunk: `decodeAudioData` → `AudioBuffer` |
 | **PcmRing**      | Stores decoded float32 per channel for a time window; evicts far-behind playhead                                                 |
 | **Scheduler**    | Drives `AudioContext` output — see [Scheduler options](#scheduler-options) (**production: Option B** via `WorkletScheduler`)                                    |
@@ -239,7 +239,7 @@ capacityFrames    = ceil(sampleRate × ringCapacitySec)
 ```
 
 The ring absorbs **decode and scheduling jitter only** — it is deliberately not sized
-to `chunkBufferCount`. Network and FFmpeg stalls are covered by the encoded-chunk
+to the `prefetchSec` window. Network and FFmpeg stalls are covered by the encoded-chunk
 LRU, which costs ~15x less per second than PCM. Below ~2 chunks the write splits
 across blocks and pays an extra `writeAck` round-trip plus a 16 ms poll per split;
 above that, extra capacity only lengthens how far decode (and therefore the waveform
@@ -428,28 +428,27 @@ AudioWorklet does not remove encode-splice discontinuities unless PCM is blended
 
 ### Buffer policy
 
-`**chunkBufferCount`** (VS Code setting) — number of chunks in the forward buffer, **including the current chunk**:
+`**prefetchSec`** (VS Code setting, default **30**) — how far ahead of the playhead the loader fetches, in seconds of audio. It is a *fetch target*, not a buffer size: nothing is sized by it. The two things that actually hold data are the PCM ring (`RING_MIN_CHUNKS × chunkDurationSec`, above) and the encoded LRU (`cachedChunksSec`). The host converts it to a chunk count before handing it to the engine, which works in chunks throughout:
 
 ```
-playhead = P, chunkBufferCount = C
-→ hold / fetch chunks: P, P+1, …, P + C − 1
+C = ceil(prefetchSec / chunkDurationSec)      → prefetchChunks, at least 1
+playhead = P
+→ hold / fetch chunks: P, P+1, …, P + C − 1      (C chunks, including the current one)
 ```
 
-Example: playing chunk **10**, `chunkBufferCount = 15` → chunks **10, 11, … 24** (15 chunks, not 14).
+Example: at the 2 s chunk default, `prefetchSec = 30` → `C = 15`; playing chunk **10** → chunks **10, 11, … 24** (15 chunks, not 14). Raising `chunkDurationSec` shrinks the count but holds the ~30 s window. ChunkLoader tops up the window as playback advances.
 
-At 2 s/chunk, `chunkBufferCount = 15` ≈ 30 s of audio from the playhead. ChunkLoader tops up the window as playback advances.
-
-**Encoded chunk LRU** (`maxEncodedChunks`, default **300**):
+**Encoded chunk LRU** (`cachedChunksSec`, default **300** — 5 minutes, likewise `ceil`-converted to a chunk count):
 
 - Fetched chunk bytes (`ArrayBuffer`) are stored in a bounded LRU keyed by chunk index.
-- Chunks in the active pin window — `[playhead − 2 … playhead + chunkBufferCount − 1]` — are never evicted.
+- Chunks in the active pin window — `[playhead − 2 … playhead + prefetchChunks − 1]` — are never evicted.
 - When over capacity, the oldest unpinned entry is removed. Seek-back within the cache avoids re-fetch; distant entries are evicted as the playhead moves.
 
 **Behind playhead** (pin window, not decoded PCM cache):
 
 - Keep **2 chunks** behind playhead in the encoded LRU pin window for quick rewind without re-fetch.
 
-**On seek:** cancel in-flight fetches, reset ring, fetch the seek chunk first, then fill `[playhead, playhead + chunkBufferCount − 1]`.
+**On seek:** cancel in-flight fetches, reset ring, fetch the seek chunk first, then fill `[playhead, playhead + prefetchChunks − 1]`.
 
 ### Decode chunk → PCM
 

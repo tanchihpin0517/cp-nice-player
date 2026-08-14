@@ -38,7 +38,7 @@ suite('Stream index builder', () => {
 		await removeTempWorkDir(workDir);
 		await vscode.workspace
 			.getConfiguration('cp-nice-player')
-			.update('playback.maxIndexEntries', undefined, vscode.ConfigurationTarget.Global);
+			.update('playback.cachedIndexes', undefined, vscode.ConfigurationTarget.Global);
 	});
 
 	setup(() => {
@@ -107,10 +107,10 @@ suite('Stream index builder', () => {
 		assert.strictEqual(first, second);
 	});
 
-	test('getOrCreateIndex evicts oldest entry when maxIndexEntries exceeded', async () => {
+	test('getOrCreateIndex evicts oldest entry when cachedIndexes exceeded', async () => {
 		await vscode.workspace
 			.getConfiguration('cp-nice-player')
-			.update('playback.maxIndexEntries', 2, vscode.ConfigurationTarget.Global);
+			.update('playback.cachedIndexes', 2, vscode.ConfigurationTarget.Global);
 
 		const pathA = path.join(workDir, 'a.wav');
 		const pathB = path.join(workDir, 'b.wav');

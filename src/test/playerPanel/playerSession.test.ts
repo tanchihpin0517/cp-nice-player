@@ -228,12 +228,12 @@ suite('WebviewPlayerSession', () => {
 		const loadMessage = loadMessages[0] as {
 			serverUrl: string;
 			audioId: string;
-			debug: { fsPath: string; chunkBufferCount: number };
+			debug: { fsPath: string; prefetchChunks: number };
 		};
 		assert.strictEqual(loadMessage.serverUrl, 'http://127.0.0.1:54321');
 		assert.strictEqual(loadMessage.audioId, 'a1b2c3d4');
 		assert.strictEqual(loadMessage.debug.fsPath, mediaUri.fsPath);
-		assert.ok(loadMessage.debug.chunkBufferCount > 0);
+		assert.ok(loadMessage.debug.prefetchChunks > 0);
 
 		receiveMessage({ type: 'ready' });
 		assert.strictEqual(

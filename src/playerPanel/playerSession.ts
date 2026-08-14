@@ -2,10 +2,10 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
-	getChunkBufferCount,
 	getChunkDurationSec,
-	getMaxEncodedChunks,
+	getMaxCachedChunks,
 	getPlaybackOggQuality,
+	getPrefetchChunks,
 } from '../config';
 import { EncodeFormat } from '../encodeFormat';
 import { FfmpegCheckResult, getEffectiveEncodeFormat } from '../ffmpegHost';
@@ -24,8 +24,8 @@ interface LoadMediaMessage {
 		playbackFormat: EncodeFormat;
 		playbackOggQuality: number;
 		chunkDurationSec: number;
-		chunkBufferCount: number;
-		maxEncodedChunks: number;
+		prefetchChunks: number;
+		maxCachedChunks: number;
 	};
 }
 
@@ -248,8 +248,8 @@ export class WebviewPlayerSession implements PlayerSession {
 				playbackFormat: getEffectiveEncodeFormat(),
 				playbackOggQuality: getPlaybackOggQuality(),
 				chunkDurationSec: getChunkDurationSec(),
-				chunkBufferCount: getChunkBufferCount(),
-				maxEncodedChunks: getMaxEncodedChunks(),
+				prefetchChunks: getPrefetchChunks(),
+				maxCachedChunks: getMaxCachedChunks(),
 			},
 		};
 

@@ -73,7 +73,7 @@ describe('StreamingAudioEngine', () => {
 		engine.addEventListener('loading', () => events.push('loading'));
 		engine.addEventListener('ready', () => events.push('ready'));
 
-		await engine.load(serverUrl, 'abcd1234', { chunkBufferCount: 3 });
+		await engine.load(serverUrl, 'abcd1234', { prefetchChunks: 3 });
 
 		expect(events).toEqual(['loading', 'ready']);
 		expect(engine.getDuration()).toBe(manifest.durationSec);
@@ -145,8 +145,8 @@ describe('StreamingAudioEngine', () => {
 
 	it('encoded LRU eviction keeps pinned chunks', async () => {
 		await engine.load(serverUrl, 'abcd1234', {
-			chunkBufferCount: 1,
-			maxEncodedChunks: 3,
+			prefetchChunks: 1,
+			maxCachedChunks: 3,
 		});
 
 		engine.pausedAt = 2;
@@ -170,7 +170,7 @@ describe('StreamingAudioEngine', () => {
 	 * touched, not the order they sit in the file.
 	 */
 	it('reports the encoded cache as a sorted chunk span', async () => {
-		await engine.load(serverUrl, 'abcd1234', { maxEncodedChunks: 10 });
+		await engine.load(serverUrl, 'abcd1234', { maxCachedChunks: 10 });
 
 		for (const index of [3, 0, 1, 2, 5]) {
 			engine._storeEncodedChunk(index, new ArrayBuffer(16));
@@ -180,7 +180,7 @@ describe('StreamingAudioEngine', () => {
 	});
 
 	it('maintains fetch window for current playhead chunk', async () => {
-		await engine.load(serverUrl, 'abcd1234', { chunkBufferCount: 3 });
+		await engine.load(serverUrl, 'abcd1234', { prefetchChunks: 3 });
 
 		await vi.advanceTimersByTimeAsync(250);
 

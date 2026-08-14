@@ -1,14 +1,16 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import {
-	getChunkBufferCount,
+	getCachedChunksSec,
+	getCachedIndexes,
 	getChunkDurationSec,
 	getCrossfadeMs,
 	getDebugLogging,
-	getMaxEncodedChunks,
-	getMaxIndexEntries,
+	getMaxCachedChunks,
 	getPlaybackFormat,
 	getPlaybackOggQuality,
+	getPrefetchChunks,
+	getPrefetchSec,
 	logPlaybackSettings,
 } from '../config';
 
@@ -28,9 +30,9 @@ suite('Config', () => {
 		await clearConfig('playback.oggQuality');
 		await clearConfig('playback.chunkDurationSec');
 		await clearConfig('playback.crossfadeMs');
-		await clearConfig('playback.chunkBufferCount');
-		await clearConfig('playback.maxIndexEntries');
-		await clearConfig('playback.maxEncodedChunks');
+		await clearConfig('playback.prefetchSec');
+		await clearConfig('playback.cachedIndexes');
+		await clearConfig('playback.cachedChunksSec');
 		await clearConfig('playback.format');
 		await clearConfig('playback.debugLogging');
 	});
@@ -56,28 +58,52 @@ suite('Config', () => {
 		assert.strictEqual(getCrossfadeMs(), 500);
 	});
 
-	test('getChunkBufferCount clamps to a minimum of 1 with no upper bound', async () => {
-		await setConfig('playback.chunkBufferCount', 0);
-		assert.strictEqual(getChunkBufferCount(), 1);
+	test('getPrefetchSec clamps negatives to 0', async () => {
+		await setConfig('playback.prefetchSec', 45);
+		assert.strictEqual(getPrefetchSec(), 45);
 
-		await setConfig('playback.chunkBufferCount', 500);
-		assert.strictEqual(getChunkBufferCount(), 500);
+		await setConfig('playback.prefetchSec', -10);
+		assert.strictEqual(getPrefetchSec(), 0);
 	});
 
-	test('getMaxIndexEntries clamps to 1-256', async () => {
-		await setConfig('playback.maxIndexEntries', 0);
-		assert.strictEqual(getMaxIndexEntries(), 1);
+	test('getPrefetchChunks derives the count from the chunk duration', async () => {
+		await setConfig('playback.chunkDurationSec', 2);
+		await setConfig('playback.prefetchSec', 30);
+		assert.strictEqual(getPrefetchChunks(), 15);
 
-		await setConfig('playback.maxIndexEntries', 999);
-		assert.strictEqual(getMaxIndexEntries(), 256);
+		await setConfig('playback.chunkDurationSec', 4);
+		assert.strictEqual(getPrefetchChunks(), 8);
+
+		await setConfig('playback.prefetchSec', 0);
+		assert.strictEqual(getPrefetchChunks(), 1);
 	});
 
-	test('getMaxEncodedChunks clamps to a minimum of 1 with no upper bound', async () => {
-		await setConfig('playback.maxEncodedChunks', 0);
-		assert.strictEqual(getMaxEncodedChunks(), 1);
+	test('getCachedIndexes clamps to a minimum of 1 with no upper bound', async () => {
+		await setConfig('playback.cachedIndexes', 0);
+		assert.strictEqual(getCachedIndexes(), 1);
 
-		await setConfig('playback.maxEncodedChunks', 999);
-		assert.strictEqual(getMaxEncodedChunks(), 999);
+		await setConfig('playback.cachedIndexes', 999);
+		assert.strictEqual(getCachedIndexes(), 999);
+	});
+
+	test('getCachedChunksSec clamps negatives to 0', async () => {
+		await setConfig('playback.cachedChunksSec', 600);
+		assert.strictEqual(getCachedChunksSec(), 600);
+
+		await setConfig('playback.cachedChunksSec', -1);
+		assert.strictEqual(getCachedChunksSec(), 0);
+	});
+
+	test('getMaxCachedChunks derives the count from the chunk duration', async () => {
+		await setConfig('playback.chunkDurationSec', 2);
+		await setConfig('playback.cachedChunksSec', 300);
+		assert.strictEqual(getMaxCachedChunks(), 150);
+
+		await setConfig('playback.chunkDurationSec', 4);
+		assert.strictEqual(getMaxCachedChunks(), 75);
+
+		await setConfig('playback.cachedChunksSec', 0);
+		assert.strictEqual(getMaxCachedChunks(), 1);
 	});
 
 	test('getPlaybackFormat falls back to ogg for invalid values', async () => {

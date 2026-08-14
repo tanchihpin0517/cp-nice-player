@@ -30,25 +30,40 @@ export function getCrossfadeMs(): number {
 	return Math.min(500, Math.max(0, Math.round(value)));
 }
 
-export function getChunkBufferCount(): number {
+function chunkCountForSeconds(seconds: number): number {
+	if (!Number.isFinite(seconds) || seconds <= 0) {
+		return 1;
+	}
+	return Math.max(1, Math.ceil(seconds / getChunkDurationSec()));
+}
+
+export function getPrefetchSec(): number {
 	const value = vscode.workspace
 		.getConfiguration('cp-nice-player')
-		.get<number>('playback.chunkBufferCount', 15);
+		.get<number>('playback.prefetchSec', 30);
+	return Math.max(0, value);
+}
+
+export function getPrefetchChunks(): number {
+	return chunkCountForSeconds(getPrefetchSec());
+}
+
+export function getCachedIndexes(): number {
+	const value = vscode.workspace
+		.getConfiguration('cp-nice-player')
+		.get<number>('playback.cachedIndexes', 100);
 	return Math.max(1, Math.round(value));
 }
 
-export function getMaxIndexEntries(): number {
+export function getCachedChunksSec(): number {
 	const value = vscode.workspace
 		.getConfiguration('cp-nice-player')
-		.get<number>('playback.maxIndexEntries', 64);
-	return Math.min(256, Math.max(1, Math.round(value)));
+		.get<number>('playback.cachedChunksSec', 300);
+	return Math.max(0, value);
 }
 
-export function getMaxEncodedChunks(): number {
-	const value = vscode.workspace
-		.getConfiguration('cp-nice-player')
-		.get<number>('playback.maxEncodedChunks', 300);
-	return Math.max(1, Math.round(value));
+export function getMaxCachedChunks(): number {
+	return chunkCountForSeconds(getCachedChunksSec());
 }
 
 export function getDebugLogging(): boolean {
@@ -74,9 +89,9 @@ export function logPlaybackSettings(): void {
 			+ `oggQuality=${getPlaybackOggQuality()}, `
 			+ `chunkDurationSec=${getChunkDurationSec()}, `
 			+ `crossfadeMs=${getCrossfadeMs()}, `
-			+ `chunkBufferCount=${getChunkBufferCount()}, `
-			+ `maxIndexEntries=${getMaxIndexEntries()}, `
-			+ `maxEncodedChunks=${getMaxEncodedChunks()}, `
+			+ `prefetchSec=${getPrefetchSec()} (${getPrefetchChunks()} chunks), `
+			+ `cachedIndexes=${getCachedIndexes()}, `
+			+ `cachedChunksSec=${getCachedChunksSec()} (${getMaxCachedChunks()} chunks), `
 			+ `debugLogging=${getDebugLogging()}`,
 	);
 }

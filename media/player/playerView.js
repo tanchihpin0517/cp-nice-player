@@ -238,9 +238,9 @@ class PlayerView {
     try {
       await this.engine.load(message.serverUrl, message.audioId, {
         name: message.name,
-        chunkBufferCount: message.debug.chunkBufferCount,
+        prefetchChunks: message.debug.prefetchChunks,
         chunkDurationSec: message.debug.chunkDurationSec,
-        maxEncodedChunks: message.debug.maxEncodedChunks,
+        maxCachedChunks: message.debug.maxCachedChunks,
       });
       this.setState('ready');
       this.setStatus('Ready', 'live');
@@ -912,7 +912,7 @@ class PlayerView {
       field('currentChunk', String(d.currentChunkIndex)),
       field('decoded chunks', d.decodedChunks || '—'),
       field('fetch in-flight', d.fetchInFlight || 'idle'),
-      field('encoded cache', (d.encodedChunkCount ?? 0) + ' / ' + (d.maxEncodedChunks ?? '—')),
+      field('cached chunks', (d.encodedChunkCount ?? 0) + ' / ' + (d.maxCachedChunks ?? '—')),
       field('ring buffered', d.ringFramesAvailable != null
         ? d.ringFramesAvailable + ' frames (' + d.ringFreeFrames + ' free)'
         : '—'),

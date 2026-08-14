@@ -1,4 +1,4 @@
-import { getChunkDurationSec, getCrossfadeMs, getMaxIndexEntries } from '../../config';
+import { getCachedIndexes, getChunkDurationSec, getCrossfadeMs } from '../../config';
 import {
 	codecForEncodeFormat,
 	contentTypeForEncodeFormat,
@@ -150,7 +150,7 @@ function getCachedIndex(key: string): StreamIndexManifest | undefined {
 function setCachedIndex(key: string, manifest: StreamIndexManifest): void {
 	if (indexCache.has(key)) {
 		indexCache.delete(key);
-	} else if (indexCache.size >= getMaxIndexEntries()) {
+	} else if (indexCache.size >= getCachedIndexes()) {
 		const oldest = indexCache.keys().next().value;
 		if (oldest !== undefined) {
 			indexCache.delete(oldest);

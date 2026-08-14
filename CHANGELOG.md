@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking** — the two chunk-count settings are now durations: `playback.chunkBufferCount` becomes `playback.prefetchSec` (default `30`) and `playback.maxEncodedChunks` becomes `playback.cachedChunksSec` (default `300`, i.e. 5 minutes of cached audio). Both counts are derived as `ceil(seconds / playback.chunkDurationSec)`, floored at 1, so changing the chunk duration no longer silently resizes these windows in wall-clock terms. The new names also separate the two concerns the old ones blurred: `prefetchSec` is how far ahead the loader fetches, `cachedChunksSec` is how much fetched audio is retained on both sides of the playhead. Custom values for the removed settings are not migrated — set the new keys instead.
+- **Breaking** — `playback.maxIndexEntries` is renamed to `playback.cachedIndexes`. The old name read as a count of entries within one index rather than a count of cached per-file indexes. Custom values are not migrated.
+- The cached-index default rises from `64` to `100` and the `256` ceiling is dropped (floor stays at `1`). A cached index is metadata only — ~152 bytes per chunk entry, about 4.5 KB per minute of audio at the default chunk duration — so 100 typical songs cost under 2 MB and the old ceiling was capping something that was never expensive.
+
 ## [0.4.0] - 2026-08-13
 
 ### Added

@@ -88,24 +88,23 @@
           "maximum": 500,
           "description": "Per-chunk crossfade/overlap tail length in milliseconds."
         },
-        "cp-nice-player.playback.chunkBufferCount": {
+        "cp-nice-player.playback.prefetchSec": {
           "type": "number",
-          "default": 15,
-          "minimum": 1,
-          "description": "Number of chunks to buffer from the playhead, including the current chunk."
+          "default": 30,
+          "minimum": 0,
+          "description": "How far ahead of the playhead the player fetches chunks, in seconds of audio, counting the current chunk. The chunk count is derived from playback.chunkDurationSec."
         },
-        "cp-nice-player.playback.maxIndexEntries": {
+        "cp-nice-player.playback.cachedIndexes": {
           "type": "number",
-          "default": 64,
+          "default": 100,
           "minimum": 1,
-          "maximum": 256,
-          "description": "Maximum number of stream index manifests kept in memory for the playback server session."
+          "description": "How many recently opened media files keep their cached stream index in memory, so reopening one skips the FFmpeg frame scan. Each index is metadata only — roughly 4.5 KB per minute of audio at the default chunk duration. Cleared when the playback server restarts."
         },
-        "cp-nice-player.playback.maxEncodedChunks": {
+        "cp-nice-player.playback.cachedChunksSec": {
           "type": "number",
           "default": 300,
-          "minimum": 1,
-          "description": "Maximum number of encoded audio chunks kept in the webview LRU cache."
+          "minimum": 0,
+          "description": "Seconds of already-fetched audio the player keeps cached, so seeking back into it does not re-fetch. Spans both sides of the playhead. The chunk count is derived from playback.chunkDurationSec."
         },
         "cp-nice-player.playback.debugLogging": {
           "type": "boolean",

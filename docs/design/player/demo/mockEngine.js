@@ -130,9 +130,9 @@ class MockEngine extends EventTarget {
     this.isPlaying = false;
     this.volume = 1;
     this.muted = false;
-    this.chunkBufferCount = 5;
+    this.prefetchChunks = 5;
     this.chunkDurationSec = 1;
-    this.maxEncodedChunks = 64;
+    this.maxCachedChunks = 64;
     this.decoded = new Set();
     this.inflight = new Map();
     this.encoded = new Set();
@@ -150,9 +150,9 @@ class MockEngine extends EventTarget {
     const generation = ++this._generation;
     this._stopLoops();
     this.track = DEMO_TRACKS.find((t) => t.id === audioId) ?? DEMO_TRACKS[0];
-    this.chunkBufferCount = options.chunkBufferCount ?? 5;
+    this.prefetchChunks = options.prefetchChunks ?? 5;
     this.chunkDurationSec = options.chunkDurationSec ?? 1;
-    this.maxEncodedChunks = options.maxEncodedChunks ?? 64;
+    this.maxCachedChunks = options.maxCachedChunks ?? 64;
     this.currentTime = 0;
     this.decoded.clear();
     this.inflight.clear();
@@ -268,7 +268,7 @@ class MockEngine extends EventTarget {
     }
   }
 
-  /** Keeps chunkBufferCount chunks ahead of the playhead fetched and decoded. */
+  /** Keeps prefetchChunks chunks ahead of the playhead fetched and decoded. */
   _startPump() {
     this._stopPump();
     this._pump = setInterval(() => {
@@ -278,7 +278,7 @@ class MockEngine extends EventTarget {
       const total = this.manifest.chunking.count;
       const current = Math.floor(this.currentTime / this.chunkDurationSec);
       const wanted = [];
-      for (let i = current; i < Math.min(total, current + this.chunkBufferCount); i += 1) {
+      for (let i = current; i < Math.min(total, current + this.prefetchChunks); i += 1) {
         wanted.push(i);
       }
 
@@ -291,11 +291,11 @@ class MockEngine extends EventTarget {
 
       // Evict what fell behind the window, mirroring the engine's bounded memory.
       for (const index of [...this.decoded]) {
-        if (index < current - 2 || index > current + this.chunkBufferCount + 2) {
+        if (index < current - 2 || index > current + this.prefetchChunks + 2) {
           this.decoded.delete(index);
         }
       }
-      while (this.encoded.size > this.maxEncodedChunks) {
+      while (this.encoded.size > this.maxCachedChunks) {
         this.encoded.delete(this.encoded.values().next().value);
       }
       if (this.isPlaying && !this.decoded.has(current)) {
@@ -381,8 +381,8 @@ class MockEngine extends EventTarget {
       paused: !this.isPlaying,
       muted: this.muted,
       volume: this.volume,
-      chunkBufferCount: this.chunkBufferCount,
-      maxEncodedChunks: this.maxEncodedChunks,
+      prefetchChunks: this.prefetchChunks,
+      maxCachedChunks: this.maxCachedChunks,
       encodedChunkCount: this.encoded.size,
       currentChunkIndex: Math.floor(this.currentTime / this.chunkDurationSec),
       fetchInFlight: formatChunkRanges(inflight),

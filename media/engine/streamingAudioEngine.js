@@ -7,8 +7,10 @@ const RING_HEADROOM_SEC = 5;
 // write splits and pays an extra writeAck round-trip plus a 16 ms poll per split.
 const RING_MIN_CHUNKS = 2;
 const BEHIND_CHUNK_COUNT = 2;
-const DEFAULT_MAX_ENCODED_CHUNKS = 300;
-const DEFAULT_CHUNK_BUFFER_COUNT = 15;
+// Fallbacks for when the host omits the option; they mirror the shipped settings
+// (prefetchSec 30 and cachedChunksSec 300) at the default 2 s chunk duration.
+const DEFAULT_MAX_CACHED_CHUNKS = 150;
+const DEFAULT_PREFETCH_CHUNKS = 15;
 const DEFAULT_CHUNK_DURATION_SEC = 2;
 const WORKLET_MODULE_URL = document.querySelector('meta[name="cp-worklet-module-url"]')?.getAttribute('content') ?? '';
 
@@ -21,13 +23,13 @@ class StreamingAudioEngine extends EventTarget {
     this.audioId = '';
     this.mediaName = '';
     this.manifest = null;
-    this.chunkBufferCount = DEFAULT_CHUNK_BUFFER_COUNT;
+    this.prefetchChunks = DEFAULT_PREFETCH_CHUNKS;
     this.chunkDurationSec = DEFAULT_CHUNK_DURATION_SEC;
-    this.maxEncodedChunks = DEFAULT_MAX_ENCODED_CHUNKS;
+    this.maxCachedChunks = DEFAULT_MAX_CACHED_CHUNKS;
     this.loadGeneration = 0;
     this.indexFetchAbort = null;
     this.fetchAbortControllers = new Map();
-    this.encodedChunks = new LruMap(DEFAULT_MAX_ENCODED_CHUNKS);
+    this.encodedChunks = new LruMap(DEFAULT_MAX_CACHED_CHUNKS);
     this.fetchInFlight = new Map();
     this.decodedChunks = new Set();
     this.pausedAt = 0;
@@ -54,13 +56,13 @@ class StreamingAudioEngine extends EventTarget {
     this.serverUrl = serverUrl;
     this.audioId = audioId;
     this.mediaName = options.name || '';
-    this.chunkBufferCount = Math.max(1, Number(options.chunkBufferCount) || DEFAULT_CHUNK_BUFFER_COUNT);
+    this.prefetchChunks = Math.max(1, Number(options.prefetchChunks) || DEFAULT_PREFETCH_CHUNKS);
     this.chunkDurationSec = Math.max(0.5, Number(options.chunkDurationSec) || DEFAULT_CHUNK_DURATION_SEC);
-    this.maxEncodedChunks = Math.max(
-      this.chunkBufferCount + BEHIND_CHUNK_COUNT,
-      Number(options.maxEncodedChunks) || DEFAULT_MAX_ENCODED_CHUNKS,
+    this.maxCachedChunks = Math.max(
+      this.prefetchChunks + BEHIND_CHUNK_COUNT,
+      Number(options.maxCachedChunks) || DEFAULT_MAX_CACHED_CHUNKS,
     );
-    this.encodedChunks = new LruMap(this.maxEncodedChunks);
+    this.encodedChunks = new LruMap(this.maxCachedChunks);
     this.pausedAt = 0;
     this._resetClockBases(0);
 
@@ -219,8 +221,8 @@ class StreamingAudioEngine extends EventTarget {
       mediaName: this.mediaName,
       serverUrl: this.serverUrl,
       audioId: this.audioId,
-      chunkBufferCount: this.chunkBufferCount,
-      maxEncodedChunks: this.maxEncodedChunks,
+      prefetchChunks: this.prefetchChunks,
+      maxCachedChunks: this.maxCachedChunks,
       encodedChunkCount: this.encodedChunks.size,
       currentChunkIndex: currentChunk,
       fetchInFlight: formatChunkRanges(fetchInFlight),
@@ -295,7 +297,7 @@ class StreamingAudioEngine extends EventTarget {
    * `writeChannels` blocks on free space and the worklet never overwrites unread
    * frames, so a ring shorter than the fetch window stalls the decoder harmlessly
    * instead of corrupting audio. Read-ahead is held as encoded chunks, which cost
-   * ~15x less per second than PCM, so sizing this off `chunkBufferCount` would
+   * ~15x less per second than PCM, so sizing this off `prefetchChunks` would
    * spend megabytes to duplicate protection the encoded LRU already provides.
    */
   _ringCapacitySec() {
@@ -367,7 +369,7 @@ class StreamingAudioEngine extends EventTarget {
     const currentChunk = chunkIndexForTime(this.manifest, this.getCurrentTime());
     return {
       min: Math.max(0, currentChunk - BEHIND_CHUNK_COUNT),
-      max: Math.min(currentChunk + this.chunkBufferCount - 1, count - 1),
+      max: Math.min(currentChunk + this.prefetchChunks - 1, count - 1),
     };
   }
 
@@ -385,10 +387,10 @@ class StreamingAudioEngine extends EventTarget {
     this.encodedChunks.evictWhileOverCapacity((key) => this._isPinnedChunk(key));
   }
 
-  _getBufferWindow() {
+  _getPrefetchWindow() {
     const currentChunk = chunkIndexForTime(this.manifest, this.getCurrentTime());
     const targetEnd = Math.min(
-      currentChunk + this.chunkBufferCount - 1,
+      currentChunk + this.prefetchChunks - 1,
       this.manifest.chunking.count - 1,
     );
     return { currentChunk, targetEnd };
@@ -398,7 +400,7 @@ class StreamingAudioEngine extends EventTarget {
     if (!this.manifest) {
       return false;
     }
-    const { targetEnd } = this._getBufferWindow();
+    const { targetEnd } = this._getPrefetchWindow();
     const first = this._nextChunkToSchedule();
     if (first == null || first > targetEnd) {
       return false;
@@ -511,7 +513,7 @@ class StreamingAudioEngine extends EventTarget {
       return;
     }
     const generation = this.loadGeneration;
-    const { currentChunk, targetEnd } = this._getBufferWindow();
+    const { currentChunk, targetEnd } = this._getPrefetchWindow();
     for (let index = currentChunk; index <= targetEnd; index += 1) {
       if (this.encodedChunks.has(index)) {
         continue;
@@ -553,7 +555,7 @@ class StreamingAudioEngine extends EventTarget {
       return;
     }
 
-    const { currentChunk, targetEnd } = this._getBufferWindow();
+    const { currentChunk, targetEnd } = this._getPrefetchWindow();
     const first = this._nextChunkToSchedule();
     if (first == null) {
       return;
