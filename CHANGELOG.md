@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-14
+
 ### Changed
 
 - **Breaking** — the two chunk-count settings are now durations: `playback.chunkBufferCount` becomes `playback.prefetchSec` (default `10`, down from 15 chunks ≈ 30 s) and `playback.maxEncodedChunks` becomes `playback.cachedChunksSec` (default `300`, i.e. 5 minutes of cached audio). Both counts are derived as `ceil(seconds / playback.chunkDurationSec)`, floored at 1, so changing the chunk duration no longer silently resizes these windows in wall-clock terms. The new names also separate the two concerns the old ones blurred: `prefetchSec` is how far ahead the loader fetches, `cachedChunksSec` is how much fetched audio is retained on both sides of the playhead. Custom values for the removed settings are not migrated — set the new keys instead.
