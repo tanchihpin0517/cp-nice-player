@@ -2,7 +2,7 @@
 
 Stream audio files inside VS Code with chunked, low-latency playback powered by FFmpeg and Web Audio.
 
-Instead of transcoding an entire file before play starts, CP's Nice Player scans the source, builds a time-indexed manifest, and fetches **~1 second segments on demand**. Playback begins quickly, seeking jumps to the right chunk, and memory stays bounded to a small sliding buffer.
+Instead of transcoding an entire file before play starts, CP's Nice Player scans the source, builds a time-indexed manifest, and fetches **~2 second segments on demand**. Playback begins quickly, seeking jumps to the right chunk, and memory stays bounded to a small sliding buffer.
 
 ## Features
 
@@ -49,7 +49,7 @@ When you open a track:
 
 1. The extension starts a playback server on `127.0.0.1` in the environment where FFmpeg runs.
 2. It resolves the server address with `vscode.env.asExternalUri`, which triggers VS Code **port forwarding** when the UI and server are not on the same host (Remote SSH, Dev Containers, WSL, Codespaces, etc.). The webview receives that external URI and fetches chunks through the forwarded port.
-3. The server scans audio frames and builds an index of ~1 s, frame-aligned chunks.
+3. The server scans audio frames and builds an index of ~2 s, frame-aligned chunks.
 4. The player fetches the index, then requests chunks around the playhead.
 5. Each chunk is decoded to PCM in the webview and written into an AudioWorklet ring buffer for continuous playback.
 6. At chunk seams, a WSOLA-aligned linear crossfade blends the overlap tail of one chunk with the head of the next.
@@ -62,11 +62,11 @@ When you open a track:
 | `cp-nice-player.ffmpegPath` | *(empty)* | Path to the `ffmpeg` executable on the playback machine. Machine-scoped (user settings only). Leave empty to use `ffmpeg` from `PATH`. |
 | `cp-nice-player.playback.format` | `ogg` | Preferred output format for streamed chunks: `ogg` (smaller, faster) or `flac` (lossless). If the preferred FFmpeg encoder is unavailable, the extension falls back to **mp3** (when `ogg` is set) or **wav** (when `flac` is set). See [Encode format resolution](docs/stream.md#encode-format-resolution). |
 | `cp-nice-player.playback.oggQuality` | `6` | libvorbis quality (`0`–`10`) when effective format is `ogg`. Also maps to libmp3lame quality when fallback is `mp3`. Higher is better quality and larger chunks. |
-| `cp-nice-player.playback.chunkDurationSec` | `1` | Target duration of each streamed chunk in seconds (`0.5`–`10`). |
+| `cp-nice-player.playback.chunkDurationSec` | `2` | Target duration of each streamed chunk in seconds (`0.5`–`10`). |
 | `cp-nice-player.playback.crossfadeMs` | `20` | Per-chunk overlap tail length in milliseconds (`0`–`500`). Non-final chunks encode a short tail past the body boundary; the player crossfades it with the next chunk. Set to `0` to disable crossfade. |
-| `cp-nice-player.playback.chunkBufferCount` | `5` | Number of chunks to buffer ahead of the playhead, including the current chunk. At 1 s chunks, `5` ≈ 5 s of buffered audio. |
+| `cp-nice-player.playback.chunkBufferCount` | `15` | Number of chunks to buffer ahead of the playhead, including the current chunk. At 2 s chunks, `15` ≈ 30 s of buffered audio. |
 | `cp-nice-player.playback.maxIndexEntries` | `64` | Maximum stream index manifests kept in memory for the playback server session (`1`–`256`). |
-| `cp-nice-player.playback.maxEncodedChunks` | `64` | Maximum encoded audio chunks kept in the webview LRU cache (`1`–`256`). |
+| `cp-nice-player.playback.maxEncodedChunks` | `300` | Maximum encoded audio chunks kept in the webview LRU cache (minimum `1`). At 2 s chunks, `300` ≈ 10 minutes of buffered audio. |
 | `cp-nice-player.playback.debugLogging` | `false` | Log playback settings and transcode template at startup, plus per-request server activity, to the extension host console. |
 
 ## Known limitations

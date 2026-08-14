@@ -234,11 +234,16 @@ slot:     [0][1][x][x][x][x][·][·]
 **Ring sizing (integration):**
 
 ```
-ringCapacitySec ≥ chunkBufferCount × chunkDurationSec + headroom
+ringCapacitySec ≥ RING_MIN_CHUNKS × chunkDurationSec + headroom   (RING_MIN_CHUNKS = 2)
 capacityFrames    = ceil(sampleRate × ringCapacitySec)
 ```
 
-Too small → underruns (gaps). Too large → extra memory only.
+The ring absorbs **decode and scheduling jitter only** — it is deliberately not sized
+to `chunkBufferCount`. Network and FFmpeg stalls are covered by the encoded-chunk
+LRU, which costs ~15x less per second than PCM. Below ~2 chunks the write splits
+across blocks and pays an extra `writeAck` round-trip plus a 16 ms poll per split;
+above that, extra capacity only lengthens how far decode (and therefore the waveform
+overview) runs ahead of the playhead.
 
 ##### Main-thread `PcmRing` (helper)
 
@@ -322,7 +327,7 @@ await scheduler.play();  // AudioContext.resume()
 3. Await `{ type: 'writeAck', accepted, requested, framesAvailable, freeFrames, … }`.
 4. Advance offset by `accepted`; repeat until slice/file done.
 
-**Backpressure is required.** Writing faster than playback consumes without waiting for free space **overwrites unread PCM** (symptom: only first and last part of track audible). Size ring to at least the forward buffer window (`chunkBufferCount × chunk duration`) plus headroom.
+**Backpressure is required.** Writing faster than playback consumes without waiting for free space **overwrites unread PCM** (symptom: only first and last part of track audible). `writeChannels` waits on `freeFrames` and advances only by the `accepted` count, and `PcmRingReader.writeBlock` refuses to overwrite unread frames, so a ring shorter than the fetch window stalls the decoder rather than corrupting audio. Size it to at least `RING_MIN_CHUNKS × chunk duration` plus headroom.
 
 ##### Message protocol (main ↔ worklet port)
 
@@ -430,11 +435,11 @@ playhead = P, chunkBufferCount = C
 → hold / fetch chunks: P, P+1, …, P + C − 1
 ```
 
-Example: playing chunk **10**, `chunkBufferCount = 5` → chunks **10, 11, 12, 13, 14** (5 chunks, not 4).
+Example: playing chunk **10**, `chunkBufferCount = 15` → chunks **10, 11, … 24** (15 chunks, not 14).
 
-At 1 s/chunk, `chunkBufferCount = 5` ≈ 5 s of audio from the playhead. ChunkLoader tops up the window as playback advances.
+At 2 s/chunk, `chunkBufferCount = 15` ≈ 30 s of audio from the playhead. ChunkLoader tops up the window as playback advances.
 
-**Encoded chunk LRU** (`maxEncodedChunks`, default **64**):
+**Encoded chunk LRU** (`maxEncodedChunks`, default **300**):
 
 - Fetched chunk bytes (`ArrayBuffer`) are stored in a bounded LRU keyed by chunk index.
 - Chunks in the active pin window — `[playhead − 2 … playhead + chunkBufferCount − 1]` — are never evicted.
@@ -451,7 +456,7 @@ At 1 s/chunk, `chunkBufferCount = 5` ≈ 5 s of audio from the playhead. ChunkLo
 Each chunk is a **short self-contained encoded file** for that time range (Ogg, MP3, FLAC, or WAV per manifest `encode.contentType`; see [Encode format resolution](stream.md#encode-format-resolution)). Flow:
 
 1. `fetch(\`${serverUrl}/chunk/${n}?audioId=${id})`→`ArrayBuffer`
-2. Decode to `AudioBuffer` (small — ~1 s × 48 kHz × 2 ch ≈ manageable)
+2. Decode to `AudioBuffer` (small — ~2 s × 48 kHz × 2 ch ≈ manageable)
 3. Copy channel data into ring at offset `chunk.startSec` from manifest (account for variable chunk duration and sample-accurate alignment in v2)
 
 **WSOLA alignment at chunk joins** (`crossfade.js` → `findWsolaOffset`):

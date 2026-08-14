@@ -76,7 +76,7 @@
         },
         "cp-nice-player.playback.chunkDurationSec": {
           "type": "number",
-          "default": 1,
+          "default": 2,
           "minimum": 0.5,
           "maximum": 10,
           "description": "Duration of each streamed audio chunk in seconds."
@@ -90,9 +90,8 @@
         },
         "cp-nice-player.playback.chunkBufferCount": {
           "type": "number",
-          "default": 5,
+          "default": 15,
           "minimum": 1,
-          "maximum": 20,
           "description": "Number of chunks to buffer from the playhead, including the current chunk."
         },
         "cp-nice-player.playback.maxIndexEntries": {
@@ -104,9 +103,8 @@
         },
         "cp-nice-player.playback.maxEncodedChunks": {
           "type": "number",
-          "default": 64,
+          "default": 300,
           "minimum": 1,
-          "maximum": 256,
           "description": "Maximum number of encoded audio chunks kept in the webview LRU cache."
         },
         "cp-nice-player.playback.debugLogging": {

@@ -3,8 +3,13 @@ const TIME_UPDATE_INTERVAL_MS = 200;
 const DECODE_IDLE_MS = 200;
 const INDEX_RETRY_INTERVAL_MS = 1000;
 const RING_HEADROOM_SEC = 5;
+// Two chunks keeps a whole decoded chunk writable in one block; at one chunk the
+// write splits and pays an extra writeAck round-trip plus a 16 ms poll per split.
+const RING_MIN_CHUNKS = 2;
 const BEHIND_CHUNK_COUNT = 2;
-const DEFAULT_MAX_ENCODED_CHUNKS = 64;
+const DEFAULT_MAX_ENCODED_CHUNKS = 300;
+const DEFAULT_CHUNK_BUFFER_COUNT = 15;
+const DEFAULT_CHUNK_DURATION_SEC = 2;
 const WORKLET_MODULE_URL = document.querySelector('meta[name="cp-worklet-module-url"]')?.getAttribute('content') ?? '';
 
 class StreamingAudioEngine extends EventTarget {
@@ -16,8 +21,8 @@ class StreamingAudioEngine extends EventTarget {
     this.audioId = '';
     this.mediaName = '';
     this.manifest = null;
-    this.chunkBufferCount = 5;
-    this.chunkDurationSec = 1;
+    this.chunkBufferCount = DEFAULT_CHUNK_BUFFER_COUNT;
+    this.chunkDurationSec = DEFAULT_CHUNK_DURATION_SEC;
     this.maxEncodedChunks = DEFAULT_MAX_ENCODED_CHUNKS;
     this.loadGeneration = 0;
     this.indexFetchAbort = null;
@@ -50,8 +55,8 @@ class StreamingAudioEngine extends EventTarget {
     this.serverUrl = serverUrl;
     this.audioId = audioId;
     this.mediaName = options.name || '';
-    this.chunkBufferCount = Math.max(1, Number(options.chunkBufferCount) || 5);
-    this.chunkDurationSec = Math.max(0.5, Number(options.chunkDurationSec) || 1);
+    this.chunkBufferCount = Math.max(1, Number(options.chunkBufferCount) || DEFAULT_CHUNK_BUFFER_COUNT);
+    this.chunkDurationSec = Math.max(0.5, Number(options.chunkDurationSec) || DEFAULT_CHUNK_DURATION_SEC);
     this.maxEncodedChunks = Math.max(
       this.chunkBufferCount + BEHIND_CHUNK_COUNT,
       Number(options.maxEncodedChunks) || DEFAULT_MAX_ENCODED_CHUNKS,
@@ -284,8 +289,16 @@ class StreamingAudioEngine extends EventTarget {
     return Math.max(0, Math.round((crossfadeEndSec - endSec) * this.manifest.sampleRate));
   }
 
+  /**
+   * Ring capacity covers decode and scheduling jitter, not network read-ahead:
+   * `writeChannels` blocks on free space and the worklet never overwrites unread
+   * frames, so a ring shorter than the fetch window stalls the decoder harmlessly
+   * instead of corrupting audio. Read-ahead is held as encoded chunks, which cost
+   * ~15x less per second than PCM, so sizing this off `chunkBufferCount` would
+   * spend megabytes to duplicate protection the encoded LRU already provides.
+   */
   _ringCapacitySec() {
-    return this.chunkBufferCount * this.chunkDurationSec + RING_HEADROOM_SEC;
+    return this.chunkDurationSec * RING_MIN_CHUNKS + RING_HEADROOM_SEC;
   }
 
   _manifestAudioLayout() {

@@ -19,7 +19,7 @@ export function getPlaybackOggQuality(): number {
 export function getChunkDurationSec(): number {
 	const value = vscode.workspace
 		.getConfiguration('cp-nice-player')
-		.get<number>('playback.chunkDurationSec', 1);
+		.get<number>('playback.chunkDurationSec', 2);
 	return Math.min(10, Math.max(0.5, value));
 }
 
@@ -33,8 +33,8 @@ export function getCrossfadeMs(): number {
 export function getChunkBufferCount(): number {
 	const value = vscode.workspace
 		.getConfiguration('cp-nice-player')
-		.get<number>('playback.chunkBufferCount', 5);
-	return Math.min(20, Math.max(1, Math.round(value)));
+		.get<number>('playback.chunkBufferCount', 15);
+	return Math.max(1, Math.round(value));
 }
 
 export function getMaxIndexEntries(): number {
@@ -47,8 +47,8 @@ export function getMaxIndexEntries(): number {
 export function getMaxEncodedChunks(): number {
 	const value = vscode.workspace
 		.getConfiguration('cp-nice-player')
-		.get<number>('playback.maxEncodedChunks', 64);
-	return Math.min(256, Math.max(1, Math.round(value)));
+		.get<number>('playback.maxEncodedChunks', 300);
+	return Math.max(1, Math.round(value));
 }
 
 export function getDebugLogging(): boolean {

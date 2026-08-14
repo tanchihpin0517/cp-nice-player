@@ -545,16 +545,16 @@ Encode tail by effective format:
 ### Config additions
 
 ```json
-"cp-nice-player.playback.chunkDurationSec": { "default": 1, "minimum": 0.5, "maximum": 10 }
+"cp-nice-player.playback.chunkDurationSec": { "default": 2, "minimum": 0.5, "maximum": 10 }
 "cp-nice-player.playback.chunkBufferCount": {
-  "default": 5,
-  "description": "Number of chunks to buffer from the playhead, including the current chunk. Example: count 5 at chunk 10 → chunks 10–14."
+  "default": 15,
+  "description": "Number of chunks to buffer from the playhead, including the current chunk. Example: count 15 at chunk 10 → chunks 10–24."
 }
 "cp-nice-player.playback.crossfadeMs": { "default": 20, "minimum": 0, "maximum": 500 }
 "cp-nice-player.playback.debugLogging": { "default": false }
 ```
 
-`**chunkBufferCount**` — chunk count in the forward buffer, **including the current chunk**. Default **5** with frame-aligned ~1 s chunks (time window is approximately 5 s from the playhead).
+`**chunkBufferCount**` — chunk count in the forward buffer, **including the current chunk**. Default **15** with frame-aligned ~2 s chunks (time window is approximately 30 s from the playhead).
 
 Keep existing `playback.format` (preference: `ogg` | `flac`; see [Encode format resolution](#encode-format-resolution)) and `playback.oggQuality` (also drives mp3 quality when fallback is `mp3`).
 
@@ -660,7 +660,7 @@ Production playback uses Option B: `WorkletScheduler.writePcm()` keeps the ring 
 
 ### Buffer policy (summary)
 
-- **Forward:** `chunkBufferCount` chunks from playhead (default 5 ≈ 5 s at 1 s/chunk).
+- **Forward:** `chunkBufferCount` chunks from playhead (default 15 ≈ 30 s at 2 s/chunk).
 - **Behind:** ~2 chunks retained for quick rewind.
 - **Seek:** cancel fetches, reset buffer/scheduler, refill from seek chunk.
 - **Join:** configurable crossfade between adjacent chunks (default `20` ms via `playback.crossfadeMs`; WSOLA-aligned linear blend in the webview).
@@ -721,7 +721,7 @@ Single pass — ship only when legacy paths are gone.
 ### Planning (this doc)
 
 - Goals, API, index memoization — this file; buffer policy and schedulers — [frontend.md](frontend.md)
-- Chunk strategy: **frame-aligned ~1 s chunks inferred from scanned frame times**; `chunkBufferCount`: **5**
+- Chunk strategy: **frame-aligned ~2 s chunks inferred from scanned frame times**; `chunkBufferCount`: **15**
 - Stream-only: **no legacy code paths**
 - Ogg vs FLAC default for streaming
 
@@ -756,12 +756,12 @@ Single pass — ship only when legacy paths are gone.
 
 | Topic                 | Recommendation                                         | Rationale                                                                  |
 | --------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------- |
-| Chunk duration        | **~1 s target, frame-aligned**                         | Matches real frame timing while keeping seek/scrub responsive               |
+| Chunk duration        | **~2 s target, frame-aligned**                         | Matches real frame timing while keeping seek/scrub responsive               |
 | Open media trigger    | **VS Code editor tab**                                 | Extension registers file → posts `serverUrl` + `audioId`                   |
 | API shape             | `**/index` + `/chunk/{n}` + `?audioId=`**              | Clean URLs; backend owns path lookup and in-memory index                   |
 | Audio identity        | `**audioId` registry**                                 | Extension registers path; webview only sees opaque id                      |
 | Index memoization     | **Bounded LRU (session-scoped)**                        | Frame scan paid once per source per server run; cleared on start/dispose     |
-| Playback buffer       | `**chunkBufferCount`** (default 5)                     | Includes current chunk; playing 10 → hold 10–14                            |
+| Playback buffer       | `**chunkBufferCount`** (default 15)                    | Includes current chunk; playing 10 → hold 10–24                            |
 | Playback              | **Stream only (full refactor)**                        | Delete legacy modules; no dual paths                                       |
 | Chunk encoding        | **Effective format** (ogg/mp3/flac/wav)                | User preference + encoder probe; webview decodes with `decodeAudioData`     |
 | Self-contained chunks | **Yes (v1)**                                           | Avoid init-segment complexity in webview                                   |
@@ -780,7 +780,7 @@ Single pass — ship only when legacy paths are gone.
 
 | Risk                                       | Mitigation                                                                                          |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| Rapid scrubbing spawns many FFmpeg jobs    | Per-chunk promise dedupe + serial transcode mutex; 1 s chunks keep seek responsive |
+| Rapid scrubbing spawns many FFmpeg jobs    | Per-chunk promise dedupe + serial transcode mutex; 2 s chunks keep seek responsive |
 | Chunk boundary clicks/pops                 | Byte/frame-bounded chunk cuts + always-on 5 ms crossfade; tune 2-10 ms if needed                    |
 | Slow seek on late chunks                   | Use indexed byte seek (`-byte_seek 1`, `-ss {startByte}B`) to avoid linear time-based decode paths  |
 | VS Code webview CSP blocks localhost       | Already fetching `127.0.0.1` today — keep same pattern                                              |

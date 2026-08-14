@@ -56,12 +56,12 @@ suite('Config', () => {
 		assert.strictEqual(getCrossfadeMs(), 500);
 	});
 
-	test('getChunkBufferCount clamps to 1-20', async () => {
+	test('getChunkBufferCount clamps to a minimum of 1 with no upper bound', async () => {
 		await setConfig('playback.chunkBufferCount', 0);
 		assert.strictEqual(getChunkBufferCount(), 1);
 
-		await setConfig('playback.chunkBufferCount', 99);
-		assert.strictEqual(getChunkBufferCount(), 20);
+		await setConfig('playback.chunkBufferCount', 500);
+		assert.strictEqual(getChunkBufferCount(), 500);
 	});
 
 	test('getMaxIndexEntries clamps to 1-256', async () => {
@@ -72,12 +72,12 @@ suite('Config', () => {
 		assert.strictEqual(getMaxIndexEntries(), 256);
 	});
 
-	test('getMaxEncodedChunks clamps to 1-256', async () => {
+	test('getMaxEncodedChunks clamps to a minimum of 1 with no upper bound', async () => {
 		await setConfig('playback.maxEncodedChunks', 0);
 		assert.strictEqual(getMaxEncodedChunks(), 1);
 
 		await setConfig('playback.maxEncodedChunks', 999);
-		assert.strictEqual(getMaxEncodedChunks(), 256);
+		assert.strictEqual(getMaxEncodedChunks(), 999);
 	});
 
 	test('getPlaybackFormat falls back to ogg for invalid values', async () => {
