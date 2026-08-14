@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import { logPlaybackSettings } from './config';
+import { initManagedFfmpeg } from './ffmpegDownload';
 import {
 	clearFfmpegCache,
+	downloadManagedFfmpeg,
 	FFMPEG_MISSING_NOTIFIED_KEY,
 	refreshEncodeFormatResolution,
 	warmFfmpegAndNotifyOnce,
@@ -12,6 +14,7 @@ import { PlaybackService } from './playback/playbackService';
 
 export async function activate(context: vscode.ExtensionContext) {
 	logPlaybackSettings();
+	initManagedFfmpeg(context);
 
 	const configChange = vscode.workspace.onDidChangeConfiguration((event) => {
 		if (event.affectsConfiguration('cp-nice-player.ffmpegPath')) {
@@ -80,6 +83,15 @@ export async function activate(context: vscode.ExtensionContext) {
 	);
 
 	context.subscriptions.push(openCommand);
+
+	const downloadFfmpegCommand = vscode.commands.registerCommand(
+		'cp-nice-player.downloadFfmpeg',
+		async () => {
+			await downloadManagedFfmpeg(context);
+		},
+	);
+
+	context.subscriptions.push(downloadFfmpegCommand);
 
 	void warmFfmpegAndNotifyOnce(context);
 }

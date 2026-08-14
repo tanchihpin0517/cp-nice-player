@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Managed FFmpeg download on Linux.** When no FFmpeg is found, the missing-FFmpeg notification now offers to fetch one, and **CP's Nice Player: Download FFmpeg (Linux)** does the same on demand. This targets the case the extension actually hits — Remote SSH hosts, dev containers, and Codespaces with no FFmpeg and no root to install one. macOS and Windows keep the manual requirement: those users have a package manager and admin rights.
+- The download is pinned end to end: a dated `autobuild-*` tag from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (never the rewritable `latest` tag), an exact filename, and a SHA-256 checked as the bytes stream in. Unverified bytes are deleted rather than unpacked. Only `bin/ffmpeg` and `bin/ffprobe` are extracted, into `<globalStorage>/ffmpeg/<tag>-<arch>/`, and the new binary runs once before the install is committed. VS Code's `http.proxy` / `http.proxyStrictSSL` are honoured and the progress notification cancels cleanly.
+- `scripts/pin-ffmpeg.mjs` regenerates the pin table, cross-checking every digest against the release's published `checksums.sha256`.
+- `docs/ffmpeg.md` documents the resolution order, the download, its failure modes, and how to bump the pin.
+
+### Changed
+
+- FFmpeg resolution now falls back to a managed install: `cp-nice-player.ffmpegPath` (still the sole candidate when set), then `ffmpeg` on `PATH`, then the downloaded build. A cancelled or failed download re-arms the one-time missing-FFmpeg prompt so the offer does not vanish for good.
+
 ## [0.5.0] - 2026-08-14
 
 ### Changed

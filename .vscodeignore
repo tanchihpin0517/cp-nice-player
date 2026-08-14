@@ -4,6 +4,7 @@
 .impeccable/**
 test_audio_files/**
 scratch/**
+scripts/**
 docs/design/**
 out/**
 node_modules/**

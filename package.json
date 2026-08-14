@@ -31,6 +31,11 @@
         "command": "cp-nice-player.open",
         "title": "Open in CP's Nice Player",
         "category": "CP's Nice Player"
+      },
+      {
+        "command": "cp-nice-player.downloadFfmpeg",
+        "title": "Download FFmpeg (Linux)",
+        "category": "CP's Nice Player"
       }
     ],
     "customEditors": [
@@ -52,7 +57,7 @@
           "type": "string",
           "scope": "machine",
           "default": "",
-          "description": "Optional path to the ffmpeg executable. Leave empty to use ffmpeg from PATH. FFmpeg is required for playback."
+          "description": "Optional path to the ffmpeg executable. When set, it is the only candidate. Leave empty to use ffmpeg from PATH, or a build downloaded by the extension (Linux). FFmpeg is required for playback."
         },
         "cp-nice-player.playback.format": {
           "type": "string",
@@ -148,5 +153,8 @@
     "typescript-eslint": "^8.56.1",
     "vitest": "^4.1.9",
     "vsce": "^2.15.0"
+  },
+  "dependencies": {
+    "https-proxy-agent": "^7.0.6"
   }
 }

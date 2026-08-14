@@ -9,10 +9,21 @@ import {
 	primaryEncodeFormat,
 	resolveEncodeFormat,
 } from './encodeFormat';
+import {
+	findManagedFfmpeg,
+	formatBytes,
+	installManagedFfmpeg,
+	MANAGED_FFMPEG_BRANCH,
+	managedFfmpegUnsupportedReason,
+	resolveManagedAsset,
+} from './ffmpegDownload';
 
 const execFileAsync = promisify(execFile);
 
 export const FFMPEG_MISSING_NOTIFIED_KEY = 'ffmpegMissingNotified';
+
+/** Where the pinned builds come from, shown behind the notification's "Learn More". */
+const MANAGED_FFMPEG_HOME_URL = 'https://github.com/BtbN/FFmpeg-Builds';
 
 export interface FfmpegCheckResult {
 	available: boolean;
@@ -123,16 +134,28 @@ export function refreshEncodeFormatResolution(): void {
 	}
 }
 
+function getConfiguredFfmpegPath(): string | undefined {
+	const configured = vscode.workspace
+		.getConfiguration('cp-nice-player')
+		.get<string>('ffmpegPath')
+		?.trim();
+	return configured ? configured : undefined;
+}
+
 export async function checkFfmpegAvailable(force = false): Promise<FfmpegCheckResult> {
 	if (cachedResult && !force) {
 		return cachedResult;
 	}
 
-	const configuredPath = vscode.workspace
-		.getConfiguration('cp-nice-player')
-		.get<string>('ffmpegPath')
-		?.trim();
-	const candidates = configuredPath ? [configuredPath] : ['ffmpeg'];
+	// An explicit setting wins outright: if the user named an ffmpeg, silently
+	// running a different one would hide their mistake rather than surface it.
+	const configuredPath = getConfiguredFfmpegPath();
+	const managedPath = configuredPath ? undefined : await findManagedFfmpeg();
+	const candidates = configuredPath
+		? [configuredPath]
+		: managedPath
+			? ['ffmpeg', managedPath]
+			: ['ffmpeg'];
 
 	for (const candidate of candidates) {
 		try {
@@ -164,6 +187,50 @@ export async function checkFfmpegAvailable(force = false): Promise<FfmpegCheckRe
 	return cachedResult;
 }
 
+async function openFfmpegPathSetting(): Promise<void> {
+	await vscode.commands.executeCommand(
+		'workbench.action.openSettings',
+		'cp-nice-player.ffmpegPath',
+	);
+}
+
+async function promptForMissingFfmpeg(
+	context: vscode.ExtensionContext,
+	ffmpeg: FfmpegCheckResult,
+): Promise<void> {
+	const detail = ffmpeg.error ?? 'Install ffmpeg and ensure it is on your PATH.';
+	const asset = getConfiguredFfmpegPath() ? undefined : resolveManagedAsset();
+
+	if (!asset) {
+		void vscode.window.showInformationMessage(
+			`FFmpeg was not found. Playback is unavailable until FFmpeg is installed. ${detail}`,
+		);
+		return;
+	}
+
+	const download = `Download FFmpeg (${formatBytes(asset.sizeBytes)})`;
+	const setPath = 'Set Path…';
+	const learnMore = 'Learn More';
+	const choice = await vscode.window.showInformationMessage(
+		`FFmpeg was not found. ${detail} CP's Nice Player can download a pinned FFmpeg ${MANAGED_FFMPEG_BRANCH} build for this machine.`,
+		download,
+		setPath,
+		learnMore,
+	);
+
+	if (choice === download) {
+		await downloadManagedFfmpeg(context);
+		return;
+	}
+	if (choice === setPath) {
+		await openFfmpegPathSetting();
+		return;
+	}
+	if (choice === learnMore) {
+		await vscode.env.openExternal(vscode.Uri.parse(MANAGED_FFMPEG_HOME_URL));
+	}
+}
+
 export async function maybeNotifyFfmpegMissingOnce(
 	context: vscode.ExtensionContext,
 	ffmpeg: FfmpegCheckResult,
@@ -172,11 +239,85 @@ export async function maybeNotifyFfmpegMissingOnce(
 		return;
 	}
 
-	const detail = ffmpeg.error ?? 'Install ffmpeg and ensure it is on your PATH.';
-	void vscode.window.showInformationMessage(
-		`FFmpeg was not found. Playback is unavailable until FFmpeg is installed. ${detail}`,
-	);
+	// Recorded before the prompt is shown so the concurrent activation paths that
+	// both warm ffmpeg cannot stack two notifications.
 	await context.globalState.update(FFMPEG_MISSING_NOTIFIED_KEY, true);
+	void promptForMissingFfmpeg(context, ffmpeg);
+}
+
+async function warnConfiguredPathShadowsManaged(installedPath: string): Promise<void> {
+	const configured = getConfiguredFfmpegPath();
+	if (!configured) {
+		return;
+	}
+
+	const clear = 'Clear Setting';
+	const choice = await vscode.window.showWarningMessage(
+		`FFmpeg was installed at ${installedPath}, but cp-nice-player.ffmpegPath is set to "${configured}" and takes precedence.`,
+		clear,
+		'Open Setting',
+	);
+
+	if (choice === clear) {
+		await vscode.workspace
+			.getConfiguration('cp-nice-player')
+			.update('ffmpegPath', undefined, vscode.ConfigurationTarget.Global);
+		return;
+	}
+	if (choice) {
+		await openFfmpegPathSetting();
+	}
+}
+
+/**
+ * Downloads and installs the pinned FFmpeg build, then re-resolves the host so
+ * playback can start without a reload. Returns the refreshed check result.
+ */
+export async function downloadManagedFfmpeg(
+	context: vscode.ExtensionContext,
+): Promise<FfmpegCheckResult> {
+	const unsupported = managedFfmpegUnsupportedReason();
+	if (unsupported) {
+		void vscode.window.showWarningMessage(
+			`${unsupported} Install FFmpeg with your package manager, then set cp-nice-player.ffmpegPath if it is not on PATH.`,
+		);
+		return checkFfmpegAvailable();
+	}
+
+	let installedPath: string;
+	try {
+		installedPath = await vscode.window.withProgress(
+			{
+				location: vscode.ProgressLocation.Notification,
+				title: "CP's Nice Player: installing FFmpeg",
+				cancellable: true,
+			},
+			(progress, token) => installManagedFfmpeg(progress, token),
+		);
+	} catch (err) {
+		// The install did not happen, so re-arm the one-time prompt: otherwise a
+		// cancelled or failed download leaves the user with no FFmpeg and no offer
+		// to try again.
+		await context.globalState.update(FFMPEG_MISSING_NOTIFIED_KEY, undefined);
+
+		if (!(err instanceof vscode.CancellationError)) {
+			const message = err instanceof Error ? err.message : String(err);
+			void vscode.window.showErrorMessage(`FFmpeg download failed. ${message}`);
+		}
+		return checkFfmpegAvailable();
+	}
+
+	cachedResult = undefined;
+	const refreshed = await checkFfmpegAvailable(true);
+
+	if (refreshed.available) {
+		void vscode.window.showInformationMessage(
+			`FFmpeg is ready. ${refreshed.version ?? installedPath}`,
+		);
+	}
+	void warnConfiguredPathShadowsManaged(installedPath);
+
+	return refreshed;
 }
 
 export async function warmFfmpegAndNotifyOnce(
